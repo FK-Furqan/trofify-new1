@@ -1,0 +1,124 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+/* Two-column AuthSystem styles */
+.auth-system-2col {
+  min-height: 100vh;
+  background: #f8f9fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.auth-system-2col__container {
+  display: flex;
+  width: 100%;
+  max-width: 900px;
+  background: #fff;
+  border-radius: 1rem;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.08);
+  overflow: hidden;
+}
+.auth-system-2col__logo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #f8f9fa;
+  padding: 2rem;
+}
+.auth-system-2col__form {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 2rem;
+}
+@media (max-width: 768px) {
+  .auth-system-2col__container {
+    flex-direction: column;
+    min-width: 0;
+    max-width: 95vw;
+    box-shadow: none;
+    border-radius: 0;
+  }
+  .auth-system-2col__logo, .auth-system-2col__form {
+    padding: 1.5rem;
+  }
+  .auth-system-2col__logo {
+    min-height: 180px;
+    margin-bottom: 1.5rem;
+  }
+  .auth-system-2col__logo img {
+    width: 120px !important;
+    height: 120px !important;
+    margin-bottom: 0;
+  }
+}
+
+/* Custom scrollbar for post detail view */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #222b3a #101522;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #222b3a;
+  border-radius: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #101522;
+}
+@media (prefers-color-scheme: light) {
+  .custom-scrollbar {
+    scrollbar-color: #e5e7eb #f3f4f6;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #e5e7eb;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #f3f4f6;
+  }
+}
