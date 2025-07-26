@@ -33,6 +33,7 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { PostActions } from "./PostActions";
 import { PostCard } from "./PostCard";
+import { PostModal } from "./PostModal";
 import { getBackendUrl } from "@/lib/utils";
 const defaultAvatar = "/placeholder.svg"; // Use direct public path
 
@@ -75,6 +76,8 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [postToDelete, setPostToDelete] = useState<string | null>(null);
   const [navigatingBack, setNavigatingBack] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<any>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Format time ago helper function
   const formatTimeAgo = (dateString: string) => {
@@ -138,7 +141,7 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
         // Convert ID to string to ensure consistency
         const profileId = profile.id.toString();
         console.log("Making request to:", `${getBackendUrl()}/api/posts/user/${profileId}`);
-        const res = await fetch(`${getBackendUrl()}/api/posts/user/${profileId}`);
+        const res = await fetch(`${getBackendUrl()}/api/posts/user/${profileId}?current_user_id=${loggedInUserId}`);
         console.log("Response status:", res.status);
         if (!res.ok) {
           const errorText = await res.text();
@@ -300,8 +303,8 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
 
   // Add message navigation handler
   const handleMessageClick = () => {
-    if (onNavigateToMessages) {
-      onNavigateToMessages();
+    if (onNavigateToMessages && normalizedProfile?.id) {
+      onNavigateToMessages(normalizedProfile.id);
     }
   };
 
@@ -324,6 +327,16 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
     } finally {
       setPostsLoading(false);
     }
+  };
+
+  const handlePostClick = (post: any) => {
+    setSelectedPost(post);
+    setIsModalOpen(true);
+  };
+
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setSelectedPost(null);
   };
 
   // Remove defaultProfile and any fallback to it
@@ -478,7 +491,7 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
           <button
             onClick={handleBackNavigation}
             disabled={navigatingBack}
-            className="absolute top-12 left-4 bg-white dark:bg-gray-800 rounded-full p-2 shadow-lg z-30 border-2 border-[#0e9591] hover:bg-[#0e9591] transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
+            className="absolute top-1 left-4 bg-white dark:bg-gray-800 rounded-full p-2 shadow-lg z-30 border-2 border-[#0e9591] hover:bg-[#0e9591] transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Go back"
           >
             {navigatingBack ? (
@@ -491,7 +504,7 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
           {/* Camera Button - Right side (only for own profile) */}
           {isOwnProfile && (
             <button
-              className="absolute top-12 right-4 bg-white dark:bg-gray-800 rounded-full p-2 shadow-lg z-30 border-2 border-[#0e9591] hover:bg-[#0e9591] transition-all duration-200 group"
+              className="absolute top-1 right-4 bg-white dark:bg-gray-800 rounded-full p-2 shadow-lg z-30 border-2 border-[#0e9591] hover:bg-[#0e9591] transition-all duration-200 group"
               onClick={() => setShowImageDialog(true)}
               aria-label="Change profile image"
             >
@@ -625,7 +638,7 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
                   {(posts || []).filter(Boolean).map((post) => {
                     // Defensive: fallback for missing/undefined post fields
                     const safeDescription = post?.description || "";
-                    const safeMediaUrl = post?.media_url || "";
+                    const safeMediaUrl = (post?.images && post.images.length > 0) ? post.images[0] : (post?.media_url || "");
                     const safeId = post?.id || Math.random().toString(36).substr(2, 9);
                     // Defensive: fallback for author fields
                     const safeAuthorName = finalProfile?.display_name || finalProfile?.full_name || finalProfile?.name || finalProfile?.email || "Unknown";
@@ -640,107 +653,38 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
                     const transformedPost = {
                       id: safeId,
                       author: {
-                        name: safeAuthorName,
-                        username: safeAuthorUsername,
-                        avatar: safeAuthorAvatar,
-                        sport: safeAuthorSport,
+                        name: post.users?.display_name || safeAuthorName,
+                        username: post.users?.email ? `@${post.users.email.split("@")[0]}` : safeAuthorUsername,
+                        avatar: post.users?.avatar || safeAuthorAvatar,
+                        sport: post.users?.sport || safeAuthorSport,
                         verified: false,
-                        id: currentProfile?.id,
-                        profile: currentProfile,
+                        id: post.users?.id || currentProfile?.id,
+                        profile: post.users || currentProfile,
                       },
                       content: safeDescription,
                       image: safeMediaUrl,
-                      likes: safeLikes,
-                      comments: safeComments,
-                      shares: safeShares,
+                      images: post?.images || [], // Add images array for PostCard
+                      likes: post.likes_count || safeLikes,
+                      comments: post.comments_count || safeComments,
+                      shares: post.shares_count || safeShares,
                       timeAgo: safeCreatedAt ? formatTimeAgo(safeCreatedAt) : "",
-                      category: safeAuthorSport,
+                      category: post.users?.sport || safeAuthorSport,
+                      isLiked: post.isLiked || false,
+                      isSaved: post.isSaved || false,
                     };
 
                     return (
-                      <div key={post.id} className="border-b-2 border-border">
-                        {/* Custom PostCard for Profile View - No Gap */}
-                        <div className="bg-card rounded-none lg:rounded-lg shadow-sm p-0 sm:p-6 lg:mx-0 m-0 border-0">
-                          {/* Header */}
-                          <div className="flex items-center justify-between mb-4 px-4 lg:px-6 pt-4">
-                      <div className="flex items-center space-x-3">
-                              <Avatar
-                                className="h-10 w-10 cursor-pointer hover:ring-2 hover:ring-blue-500 transition-all"
-                                onClick={() => onProfileClick && onProfileClick(currentProfile)}
-                              >
-                                <AvatarImage src={getAvatarUrl(finalProfile?.avatar)} onError={e => { e.currentTarget.src = "/placeholder.svg"; }} />
-                                <AvatarFallback>{finalProfile?.name?.[0] || 'U'}</AvatarFallback>
-                              </Avatar>
-                        <div>
-                          <div className="flex items-center space-x-2">
-                                  <span
-                                    className="font-semibold text-foreground cursor-pointer hover:underline"
-                                    onClick={() => onProfileClick && onProfileClick(currentProfile)}
-                                  >
-                                    {finalProfile?.name || finalProfile?.display_name || "Unknown"}
-                            </span>
-                                  {transformedPost.author.verified && (
-                                    <div className="w-4 h-4 bg-[#0e9591] rounded-full flex items-center justify-center">
-                                      <span className="text-white text-xs">✓</span>
-                          </div>
-                                  )}
-                                  <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
-                                    {finalProfile?.sport || finalProfile?.user_type || "athlete"}
-                                  </Badge>
-                          </div>
-                                <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                                  <span>{transformedPost.timeAgo}</span>
-                        </div>
-                      </div>
-                            </div>
-                            {isOwnProfile && (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="sm">
-                                    <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
-                                    className="text-red-500 focus:text-red-700"
-                                    onClick={() => {
-                                      setPostToDelete(post.id.toString());
-                                      setDeleteDialogOpen(true);
-                                    }}
-                                  >
-                                    <Trash2 className="w-4 h-4 mr-2" />
-                                    Delete
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            )}
-                    </div>
-
-                          {/* Content - No margin bottom */}
-                          <div>
-                            <p className="text-foreground mb-4 px-4 lg:px-6">{transformedPost.content}</p>
-                            {transformedPost.image && (
-                              <img
-                                src={transformedPost.image}
-                          alt="Post content"
-                                className="w-full h-48 object-cover rounded-none lg:rounded-lg m-0"
-                        />
-                      )}
-                    </div>
-
-                          {/* Actions */}
-                    <PostActions
-                            postId={transformedPost.id}
-                            userId={loggedInUserId || ""}
-                            initialLikes={transformedPost.likes}
-                            initialComments={transformedPost.comments}
-                            initialShares={transformedPost.shares}
-                            initialSaved={false} // Let PostActions fetch the actual save status
+                      <PostCard
+                        key={post.id}
+                        post={transformedPost}
                       onProfileClick={onProfileClick}
+                        showTopMenu={isOwnProfile}
+                        userId={loggedInUserId || ""}
                       onSaveChange={onSaveChange}
+                        onDelete={handleDeletePost}
+                        isSaved={transformedPost.isSaved}
+                        onPostClick={handlePostClick}
                     />
-                  </div>
-                      </div>
                     );
                   })}
                 </div>
@@ -992,7 +936,8 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
                         profile: finalProfile,
                       },
                       content: post.description,
-                      image: post.media_url ? `https://trofify-media.s3.amazonaws.com/${post.media_url}` : "",
+                      image: (post.images && post.images.length > 0) ? post.images[0] : (post.media_url ? `https://trofify-media.s3.amazonaws.com/${post.media_url}` : ""),
+                      images: post?.images || [], // Add images array for PostCard
                       likes: post.likes || 0,
                       comments: post.comments || 0,
                       shares: post.shares || 0,
@@ -1010,11 +955,7 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
                         onSaveChange={onSaveChange}
                         onDelete={handleDeletePost}
                         isSaved={false} // Profile posts are not known to be saved initially
-                        onPostClick={(post) => {
-                          // For now, we'll just log the post click
-                          // You can implement a post detail view for profile posts if needed
-                          console.log('Post clicked from profile:', post);
-                        }}
+                        onPostClick={handlePostClick}
                       />
                     </div>
                     );
@@ -1118,6 +1059,17 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
       }}>
         <Spinner />
       </div>
+    )}
+    
+    {selectedPost && (
+      <PostModal
+        post={selectedPost}
+        isOpen={isModalOpen}
+        onClose={handleModalClose}
+        userId={loggedInUserId || ""}
+        onProfileClick={onProfileClick}
+        onSaveChange={onSaveChange}
+      />
     )}
     </>
   );

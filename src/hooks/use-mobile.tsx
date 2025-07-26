@@ -1,19 +1,53 @@
-import * as React from "react"
+import { useState, useEffect } from 'react';
 
-const MOBILE_BREAKPOINT = 768
+export const useMobile = () => {
+  const [isMobile, setIsMobile] = useState(false);
 
-export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
 
-  React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  return isMobile;
+};
+
+// Custom hook for real-time message updates
+export const useRealTimeMessages = (currentUserId?: string, isActive: boolean = true) => {
+  const [messageCount, setMessageCount] = useState(0);
+
+  const fetchMessageCount = async () => {
+    if (!currentUserId) return;
+    
+    try {
+      const response = await fetch(`http://localhost:5000/api/users/${currentUserId}/unread-messages`);
+      if (response.ok) {
+        const data = await response.json();
+        setMessageCount(data.count || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching message count:', error);
     }
-    mql.addEventListener("change", onChange)
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    return () => mql.removeEventListener("change", onChange)
-  }, [])
+  };
 
-  return !!isMobile
-}
+  useEffect(() => {
+    if (!currentUserId || !isActive) return;
+
+    // Initial fetch
+    fetchMessageCount();
+
+    // Set up polling
+    const interval = setInterval(() => {
+      fetchMessageCount();
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [currentUserId, isActive]);
+
+  return { messageCount, refreshMessageCount: fetchMessageCount };
+};

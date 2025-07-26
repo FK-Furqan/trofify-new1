@@ -3,12 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useState, useEffect } from "react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { PostDetailView } from "./PostDetailView";
+import { PostModal } from "./PostModal";
 import { PostCard } from "./PostCard";
 import axios from "axios";
 import { toast } from "@/components/ui/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { getBackendUrl } from "@/lib/utils";
+import { UniversalLoader } from "@/components/ui/universal-loader";
 
 interface SavedPostsViewProps {
   onProfileClick?: (profile: any) => void;
@@ -17,6 +18,7 @@ interface SavedPostsViewProps {
 
 export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) => {
   const [selectedPost, setSelectedPost] = useState<any>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [savedPosts, setSavedPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -33,6 +35,7 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
     try {
       setLoading(true);
       const response = await axios.get(`${getBackendUrl()}/api/users/${userId}/saved-posts`);
+      console.log('Saved posts response:', response.data);
       setSavedPosts(response.data);
       setError("");
     } catch (err) {
@@ -95,8 +98,9 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
     }
   };
 
-  // Handle back from post detail view
-  const handleBackFromPost = () => {
+  // Handle modal close
+  const handleModalClose = () => {
+    setIsModalOpen(false);
     setSelectedPost(null);
   };
 
@@ -113,6 +117,7 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
 
   const handlePostClick = (post: any) => {
     setSelectedPost(post);
+    setIsModalOpen(true);
   };
 
   // Helper to get the correct avatar URL
@@ -123,16 +128,7 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
   };
 
   if (loading) {
-    return (
-      <div className="w-full lg:px-4 lg:max-w-4xl lg:mx-auto px-0 mx-0">
-        <div className="w-full max-w-md mx-auto bg-card min-h-screen flex items-center justify-center">
-          <div className="flex items-center space-x-3">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#0e9591]"></div>
-            <p className="text-muted-foreground">Loading saved posts...</p>
-          </div>
-        </div>
-      </div>
-    );
+    return <UniversalLoader />;
   }
 
   if (error) {
@@ -145,160 +141,67 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
     );
   }
 
-  // Show post detail view if a post is selected
-  if (selectedPost) {
-    return (
-      <PostDetailView
-        post={selectedPost}
-        onBack={handleBackFromPost}
-        userId={userId || ""}
-        onProfileClick={onProfileClick}
-        onSaveChange={handleSaveChange}
-      />
-    );
-  }
-
+  // Unified post layout (like Feed)
   return (
-    <div className="w-full lg:px-4 lg:max-w-4xl lg:mx-auto px-0 mx-0">
-      <div className={`${viewMode === 'list' ? 'w-full' : 'w-full max-w-md mx-auto'} bg-card min-h-screen`}>
-        {/* Header */}
-        <div className="p-4 border-b border-border">
-          <div className="flex items-center justify-between mb-2">
-            <h1 className="text-2xl font-bold text-foreground">Saved Posts</h1>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant={viewMode === 'list' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode('list')}
-                className={viewMode === 'list' ? 'bg-[#0e9591] text-white' : ''}
-              >
-                <List className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={viewMode === 'grid' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode('grid')}
-                className={viewMode === 'grid' ? 'bg-[#0e9591] text-white' : ''}
-              >
-                <Grid className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className={viewMode === 'list' ? 'p-0' : 'p-4'}>
+    <>
+      <div className="w-full space-y-0">
           {savedPosts.length === 0 ? (
             <div className="text-center py-12">
               <Bookmark className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-medium text-foreground mb-2">No saved posts yet</h3>
               <p className="text-muted-foreground text-center">Posts you save will appear here</p>
             </div>
-          ) : viewMode === 'list' ? (
-            // List view - Full screen like home page
-            <div className="space-y-0">
-              {savedPosts.map((post) => {
+      ) : (
+        savedPosts.map((post) => {
                 // Transform saved post data to match PostCard format
                 const transformedPost = {
                   id: post.id,
                   author: {
                     name: post.author_name ? post.author_name : (post.email || 'Unknown'),
                     username: post.author_name ? `@${post.author_name.toLowerCase().replace(/\s+/g, '')}` : post.email,
-                    avatar: post.users?.avatar || post.avatar || "/placeholder.svg",
+                    avatar: post.avatar || "/placeholder.svg",
                     sport: post.category || post.user_type,
                     verified: false,
                     id: post.user_id,
-                    profile: post.users || null,
+                    profile: null,
                   },
                   content: post.description || post.content,
-                  image: post.image || post.media_url || "",
+                  image: (post.images && post.images.length > 0) ? post.images[0] : (post.image || post.media_url || ""),
+                  images: post.images || [], // Add images array for PostCard
                   likes: post.likes || 0,
                   comments: post.comments || 0,
                   shares: post.shares || 0,
                   timeAgo: post.created_at ? formatDate(post.created_at) : "",
                   category: post.category || post.user_type,
+                  isLiked: post.isLiked || false,
+                  isSaved: post.isSaved || true,
                 };
-
                 return (
-                  <div key={post.id} className="border-b-2 border-border">
                     <PostCard
+                      key={post.id}
                       post={transformedPost}
                       onProfileClick={handleProfileClick}
                       showTopMenu={false}
                       userId={userId || ""}
                       onSaveChange={handleSaveChange}
                       onPostClick={handlePostClick}
-                      isSaved={true} // Indicate this is a saved post
+                      isSaved={transformedPost.isSaved}
                     />
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            // Grid view - Compact cards
-            <div className="grid grid-cols-2 gap-4">
-              {savedPosts.map((post) => (
-                <div
-                  key={post.id}
-                  className="border border-border rounded-lg overflow-hidden hover:shadow-md transition-shadow cursor-pointer h-full flex flex-col"
-                  onClick={() => handlePostClick(post)}
-                >
-                  {(post.image || post.media_url) && (
-                    <img
-                      src={post.image || `https://trofify-media.s3.amazonaws.com/${post.media_url}`}
-                      alt="Post content"
-                      className="w-full object-cover h-32"
-                    />
-                  )}
-                  {!post.image && !post.media_url && (
-                    <div className="w-full bg-muted flex items-center justify-center h-32">
-                      <span className="text-muted-foreground text-2xl">📄</span>
-                    </div>
-                  )}
-                  <div className="p-4 flex-1 flex flex-col">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <Avatar className="h-6 w-6">
-                        <AvatarImage src={getAvatarUrl(post.avatar)} />
-                        <AvatarFallback>{(post.author_name || post.email || "U")[0]}</AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-foreground truncate">{post.author_name || post.email}</div>
-                        <div className="text-xs text-muted-foreground truncate">{post.category || post.user_type}</div>
-                      </div>
+          );
+        })
+      )}
                     </div>
                     
-                    <p className="text-foreground text-sm mb-3 line-clamp-2">
-                      {post.description || post.content}
-                    </p>
-                    
-                    <div className="flex items-center justify-between mt-auto">
-                      <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
-                        {post.category || post.user_type}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {post.created_at ? new Date(post.created_at).toLocaleDateString() : 'Recently'}
-                      </span>
-                    </div>
-                    
-                    <div className="flex items-center justify-between mt-2">
-                      <div className="flex items-center space-x-4 text-xs text-muted-foreground">
-                        <span>❤️ {post.likes || 0}</span>
-                        <span>💬 {post.comments || 0}</span>
-                      </div>
-                      <button 
-                        className="p-2 text-muted-foreground hover:text-foreground saved-post-menu" 
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <MoreVertical className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+      {selectedPost && (
+        <PostModal
+          post={selectedPost}
+          isOpen={isModalOpen}
+          onClose={handleModalClose}
+          userId={userId || ""}
+          onProfileClick={onProfileClick}
+          onSaveChange={handleSaveChange}
+        />
+      )}
+    </>
   );
 };

@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { X, Upload, Image as ImageIcon, Video, Smile, MapPin, UserTag } from "lucide-react";
+import { X, Upload, Image as ImageIcon, Video, Smile, MapPin } from "lucide-react";
 import { toast } from "sonner";
 
 // Helper function to get backend URL
@@ -25,41 +25,38 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
   }
 
   const [content, setContent] = useState("");
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [preview, setPreview] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
 
   const handleFileSelect = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      // Validate file type
-      const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/webm'];
+    const files = Array.from(event.target.files);
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const newFiles: File[] = [];
+    const newPreviews: string[] = [];
+    for (const file of files) {
       if (!validTypes.includes(file.type)) {
-        toast.error("Please select a valid image or video file");
-        return;
+        toast.error("Please select a valid image file");
+        continue;
       }
-
-      // Validate file size (10MB limit)
       if (file.size > 10 * 1024 * 1024) {
         toast.error("File size must be less than 10MB");
-        return;
+        continue;
       }
-
-      setSelectedFile(file);
-      
-      // Create preview URL
-      const previewUrl = URL.createObjectURL(file);
-      setPreview(previewUrl);
+      newFiles.push(file);
+      newPreviews.push(URL.createObjectURL(file));
     }
+    setSelectedFiles((prev) => [...prev, ...newFiles]);
+    setPreviews((prev) => [...prev, ...newPreviews]);
   };
 
-  const removeFile = () => {
-    if (preview) {
-      URL.revokeObjectURL(preview);
+  const removeFile = (idx: number) => {
+    if (previews[idx]) {
+      URL.revokeObjectURL(previews[idx]);
     }
-    setSelectedFile(null);
-    setPreview(null);
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== idx));
+    setPreviews((prev) => prev.filter((_, i) => i !== idx));
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -67,46 +64,34 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!content.trim() && !selectedFile) {
-      toast.error("Please add some content or upload an image/video");
+    if (!content.trim() && selectedFiles.length === 0) {
+      toast.error("Please add some content or upload images");
       return;
     }
-
     setUploading(true);
-    
     try {
-      let mediaUrl = null;
-      let mediaType = null;
-
-      // Upload media file if selected
-      if (selectedFile) {
+      let imageUrls: string[] = [];
+      // Upload all images if selected
+      for (const file of selectedFiles) {
         const formData = new FormData();
-        formData.append('file', selectedFile);
+        formData.append('file', file);
         formData.append('user_id', user.id);
-
         const uploadResponse = await fetch(`${getBackendUrl()}/api/upload/post-media`, {
           method: 'POST',
           body: formData,
         });
-
         if (!uploadResponse.ok) {
           throw new Error('Failed to upload media');
         }
-
         const uploadData = await uploadResponse.json();
-        mediaUrl = uploadData.url;
-        mediaType = selectedFile.type.startsWith('video/') ? 'video' : 'image';
+        imageUrls.push(uploadData.url);
       }
-
       // Create post record
       const postData = {
         user_id: user.id,
         description: content.trim(),
-        media_url: mediaUrl,
-        media_type: mediaType
+        images: imageUrls,
       };
-
       const createResponse = await fetch(`${getBackendUrl()}/api/posts`, {
         method: 'POST',
         headers: {
@@ -114,27 +99,20 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
         },
         body: JSON.stringify(postData),
       });
-
       if (!createResponse.ok) {
         throw new Error('Failed to create post');
       }
-
       const newPost = await createResponse.json();
-
       // Reset form
       setContent("");
-      removeFile();
-      
-      // Close modal
+      previews.forEach((url) => URL.revokeObjectURL(url));
+      setSelectedFiles([]);
+      setPreviews([]);
       onOpenChange(false);
-      
-      // Notify parent component
       if (onPostCreated) {
         onPostCreated(newPost);
       }
-      
       toast.success("Post created successfully!");
-
     } catch (error) {
       console.error('Error creating post:', error);
       toast.error("Failed to create post. Please try again.");
@@ -157,7 +135,6 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
             Share what's on your mind with TrofiFy community
           </DialogDescription>
         </DialogHeader>
-        
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* User Info */}
           <div className="flex items-center space-x-3">
@@ -170,7 +147,6 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
               <p className="text-xs text-muted-foreground">Posting to timeline</p>
             </div>
           </div>
-
           {/* Content Input */}
           <Textarea
             placeholder="What's happening in your sports world?"
@@ -179,55 +155,32 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
             className="min-h-[100px] resize-none border-none focus:ring-0 text-lg placeholder:text-muted-foreground"
             disabled={uploading}
           />
-
-          {/* File Preview */}
-          {preview && (
+          {/* File Previews */}
+          {previews.length > 0 && (
             <Card className="relative">
-              <CardContent className="p-2">
-                <div className="relative">
-                  {getFileType() === 'video' ? (
-                    <video 
-                      src={preview} 
-                      className="w-full rounded-lg max-h-80 object-cover"
-                      controls
-                    />
-                  ) : (
+              <CardContent className="p-2 flex gap-2 overflow-x-auto">
+                {previews.map((preview, idx) => (
+                  <div key={idx} className="relative w-32 h-32 flex-shrink-0">
                     <img 
                       src={preview} 
-                      alt="Preview" 
-                      className="w-full rounded-lg max-h-80 object-cover"
+                      alt={`Preview ${idx + 1}`}
+                      className="w-full h-full object-contain rounded-lg border"
                     />
-                  )}
                   <Button
                     type="button"
                     variant="destructive"
                     size="sm"
                     className="absolute top-2 right-2"
-                    onClick={removeFile}
+                      onClick={() => removeFile(idx)}
                     disabled={uploading}
                   >
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
-                <div className="mt-2">
-                  <Badge variant="secondary">
-                    {getFileType() === 'video' ? (
-                      <>
-                        <Video className="h-3 w-3 mr-1" />
-                        Video
-                      </>
-                    ) : (
-                      <>
-                        <ImageIcon className="h-3 w-3 mr-1" />
-                        Image
-                      </>
-                    )}
-                  </Badge>
-                </div>
+                ))}
               </CardContent>
             </Card>
           )}
-
           {/* Action Buttons */}
           <div className="flex items-center justify-between pt-3 border-t">
             <div className="flex items-center space-x-3">
@@ -242,17 +195,16 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
                 <Upload className="h-4 w-4 mr-1" />
                 Media
               </Button>
-              
               <Input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,video/*"
+                accept="image/*"
+                multiple
                 onChange={handleFileSelect}
                 className="hidden"
                 disabled={uploading}
               />
             </div>
-
             <div className="flex items-center space-x-2">
               <Button 
                 type="button" 
@@ -264,7 +216,7 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
               </Button>
               <Button 
                 type="submit" 
-                disabled={uploading || (!content.trim() && !selectedFile)}
+                disabled={uploading || (!content.trim() && selectedFiles.length === 0)}
                 className="bg-[#0e9591] hover:bg-[#0c7b77] text-white"
               >
                 {uploading ? "Posting..." : "Post"}

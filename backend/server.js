@@ -176,15 +176,18 @@ app.post('/api/upload/story-media', upload.single('file'), async (req, res) => {
 // Create a new post
 app.post('/api/posts', async (req, res) => {
   try {
-    const { user_id, media_url, media_type, description } = req.body;
-    
-    const { data, error } = await supabase.from('posts').insert({
+    const { user_id, media_url, media_type, description, images } = req.body;
+    let insertData = {
       user_id,
-      media_url,
-      media_type,
       description
-    }).select().single();
-
+    };
+    if (Array.isArray(images) && images.length > 0) {
+      insertData.images = images;
+    } else {
+      insertData.media_url = media_url;
+      insertData.media_type = media_type;
+    }
+    const { data, error } = await supabase.from('posts').insert(insertData).select().single();
     if (error) throw error;
     res.json(data);
   } catch (error) {
@@ -192,9 +195,10 @@ app.post('/api/posts', async (req, res) => {
   }
 });
 
-// Get all posts with user info
+// Get all posts with user info and like status for a user
 app.get('/api/posts', async (req, res) => {
   try {
+    const userId = req.query.user_id;
     // First get posts
     const { data: posts, error: postsError } = await supabase
       .from('posts')
@@ -203,7 +207,7 @@ app.get('/api/posts', async (req, res) => {
 
     if (postsError) throw postsError;
 
-    // Then get user info for each post
+    // Then get user info and like status for each post
     const postsWithUsers = await Promise.all(
       posts.map(async (post) => {
         const { data: user, error: userError } = await supabase
@@ -215,7 +219,8 @@ app.get('/api/posts', async (req, res) => {
         if (userError || !user) {
           return {
             ...post,
-            users: { display_name: 'Unknown User', email: 'unknown@example.com', avatar: '/placeholder.svg', user_type: 'athlete' }
+            users: { display_name: 'Unknown User', email: 'unknown@example.com', avatar: '/placeholder.svg', user_type: 'athlete' },
+            isLiked: false
           };
         }
 
@@ -237,12 +242,56 @@ app.get('/api/posts', async (req, res) => {
           sport = coachData?.sport;
         }
 
+        // Get counts for likes, comments, shares, and saves
+        const { count: likesCount } = await supabase
+          .from('post_likes')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', post.id);
+
+        const { count: commentsCount } = await supabase
+          .from('post_comments')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', post.id);
+
+        const { count: sharesCount } = await supabase
+          .from('post_shares')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', post.id);
+
+        // Check if the current user has liked this post
+        let isLiked = false;
+        let isSaved = false;
+        if (userId) {
+          // Check like status
+          const { data: likeData, error: likeError } = await supabase
+            .from('post_likes')
+            .select('id')
+            .eq('post_id', post.id)
+            .eq('user_id', userId)
+            .single();
+          isLiked = !!likeData;
+
+          // Check save status
+          const { data: saveData, error: saveError } = await supabase
+            .from('post_saves')
+            .select('id')
+            .eq('post_id', post.id)
+            .eq('user_id', userId)
+            .single();
+          isSaved = !!saveData;
+        }
+
         return {
           ...post,
           users: {
             ...user,
             sport: sport
-          }
+          },
+          likes_count: likesCount || 0,
+          comments_count: commentsCount || 0,
+          shares_count: sharesCount || 0,
+          isLiked,
+          isSaved
         };
       })
     );
@@ -258,19 +307,107 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/user/:user_id', async (req, res) => {
   try {
     const { user_id } = req.params;
-    const { data, error } = await supabase
+    const currentUserId = req.query.current_user_id; // Get current user ID from query
+    
+    // First get posts
+    const { data: posts, error: postsError } = await supabase
       .from('posts')
-      .select(`
-        *,
-        users!inner(id, display_name, email, avatar),
-        post_likes(count),
-        post_comments(count)
-      `)
+      .select('*')
       .eq('user_id', user_id)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    res.json(data);
+    if (postsError) throw postsError;
+
+    // Then get user info and like/save status for each post
+    const postsWithUsers = await Promise.all(
+      posts.map(async (post) => {
+        const { data: user, error: userError } = await supabase
+          .from('users')
+          .select('id, display_name, email, user_type, avatar')
+          .eq('id', post.user_id)
+          .single();
+
+        if (userError || !user) {
+          return {
+            ...post,
+            users: { display_name: 'Unknown User', email: 'unknown@example.com', avatar: '/placeholder.svg', user_type: 'athlete' },
+            isLiked: false,
+            isSaved: false
+          };
+        }
+
+        // Get sport information from type-specific table
+        let sport = null;
+        if (user.user_type === 'athlete') {
+          const { data: athleteData } = await supabase
+            .from('athletes')
+            .select('sport')
+            .eq('user_id', user.id)
+            .single();
+          sport = athleteData?.sport;
+        } else if (user.user_type === 'coach') {
+          const { data: coachData } = await supabase
+            .from('coaches')
+            .select('sport')
+            .eq('user_id', user.id)
+            .single();
+          sport = coachData?.sport;
+        }
+
+        // Get counts for likes, comments, shares
+        const { count: likesCount } = await supabase
+          .from('post_likes')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', post.id);
+
+        const { count: commentsCount } = await supabase
+          .from('post_comments')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', post.id);
+
+        const { count: sharesCount } = await supabase
+          .from('post_shares')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', post.id);
+
+        // Check if the current user has liked this post
+        let isLiked = false;
+        let isSaved = false;
+        if (currentUserId) {
+          const { data: likeData } = await supabase
+            .from('post_likes')
+            .select('id')
+            .eq('post_id', post.id)
+            .eq('user_id', currentUserId)
+            .single();
+
+          const { data: saveData } = await supabase
+            .from('post_saves')
+            .select('id')
+            .eq('post_id', post.id)
+            .eq('user_id', currentUserId)
+            .single();
+
+          isLiked = !!likeData;
+          isSaved = !!saveData;
+        }
+
+        return {
+          ...post,
+          users: {
+            ...user,
+            sport: sport
+          },
+          likes_count: likesCount || 0,
+          comments_count: commentsCount || 0,
+          shares_count: sharesCount || 0,
+          isLiked,
+          isSaved
+        };
+      })
+    );
+
+    res.json(postsWithUsers);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -282,12 +419,60 @@ app.post('/api/posts/:post_id/like', async (req, res) => {
     const { post_id } = req.params;
     const { user_id } = req.body;
 
+    // Get post owner information
+    const { data: postData, error: postError } = await supabase
+      .from('posts')
+      .select('user_id')
+      .eq('id', parseInt(post_id))
+      .single();
+
+    if (postError) throw postError;
+
+    // Don't create notification if user is liking their own post
+    if (postData.user_id === user_id) {
     const { data, error } = await supabase.from('post_likes').insert({
       user_id,
       post_id: parseInt(post_id)
     });
 
     if (error) throw error;
+      return res.json({ message: 'Post liked successfully' });
+    }
+
+    // Get actor (liker) information
+    const { data: actorData, error: actorError } = await supabase
+      .from('users')
+      .select('id, display_name, email, avatar, user_type')
+      .eq('id', user_id)
+      .single();
+
+    if (actorError) throw actorError;
+
+    // Insert like
+    const { data, error } = await supabase.from('post_likes').insert({
+      user_id,
+      post_id: parseInt(post_id)
+    });
+
+    if (error) throw error;
+
+    // Create notification
+    const notificationMessage = `${actorData.display_name || actorData.email} liked your post`;
+    
+    const { error: notificationError } = await supabase.from('notifications').insert({
+      user_id: postData.user_id, // Post owner
+      actor_id: user_id, // User who liked
+      post_id: parseInt(post_id),
+      type: 'like',
+      message: notificationMessage,
+      is_read: false
+    });
+
+    if (notificationError) {
+      console.error('Failed to create notification:', notificationError);
+      // Don't fail the like operation if notification fails
+    }
+
     res.json({ message: 'Post liked successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -319,6 +504,25 @@ app.post('/api/posts/:post_id/comments', async (req, res) => {
     const { post_id } = req.params;
     const { user_id, comment } = req.body;
 
+    // Get post owner information
+    const { data: postData, error: postError } = await supabase
+      .from('posts')
+      .select('user_id')
+      .eq('id', parseInt(post_id))
+      .single();
+
+    if (postError) throw postError;
+
+    // Get actor (commenter) information
+    const { data: actorData, error: actorError } = await supabase
+      .from('users')
+      .select('id, display_name, email, avatar, user_type')
+      .eq('id', user_id)
+      .single();
+
+    if (actorError) throw actorError;
+
+    // Insert comment
     const { data, error } = await supabase.from('post_comments').insert({
       user_id,
       post_id: parseInt(post_id),
@@ -326,6 +530,27 @@ app.post('/api/posts/:post_id/comments', async (req, res) => {
     }).select().single();
 
     if (error) throw error;
+
+    // Don't create notification if user is commenting on their own post
+    if (postData.user_id !== user_id) {
+      // Create notification
+      const notificationMessage = `${actorData.display_name || actorData.email} commented: "${comment.substring(0, 50)}${comment.length > 50 ? '...' : ''}"`;
+      
+      const { error: notificationError } = await supabase.from('notifications').insert({
+        user_id: postData.user_id, // Post owner
+        actor_id: user_id, // User who commented
+        post_id: parseInt(post_id),
+        type: 'comment',
+        message: notificationMessage,
+        is_read: false
+      });
+
+      if (notificationError) {
+        console.error('Failed to create notification:', notificationError);
+        // Don't fail the comment operation if notification fails
+      }
+    }
+
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -340,7 +565,7 @@ app.get('/api/posts/:post_id/comments', async (req, res) => {
       .from('post_comments')
       .select(`
         *,
-        users!inner(id, display_name, email)
+        users!inner(id, display_name, email, avatar)
       `)
       .eq('post_id', parseInt(post_id))
       .order('created_at', { ascending: true });
@@ -421,7 +646,11 @@ app.get('/api/posts/:post_id/actions', async (req, res) => {
     // Comments
     const { data: comments, error: commentsError } = await supabase
       .from('post_comments')
-      .select('user_id, comment')
+      .select(`
+        user_id, 
+        comment,
+        users!inner(id, display_name, email, avatar)
+      `)
       .eq('post_id', post_id);
 
     // Shares
@@ -751,20 +980,121 @@ app.get('/api/users/:user_id', async (req, res) => {
 app.get('/api/users/:user_id/saved-posts', async (req, res) => {
   try {
     const { user_id } = req.params;
-    const { data, error } = await supabase
+    const { data: saves, error: savesError } = await supabase
       .from('post_saves')
-      .select(`
-        *,
-        posts!inner(
-          *,
-          users!inner(id, display_name, email)
-        )
-      `)
+      .select('*, posts!inner(*)')
       .eq('user_id', user_id)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    res.json(data);
+    if (savesError) throw savesError;
+
+    // For each saved post, fetch user info and enrich the post object
+    const enrichedPosts = await Promise.all(
+      (saves || []).map(async (save) => {
+        const post = save.posts;
+        if (!post) return null;
+        // Fetch user info
+        const { data: user, error: userError } = await supabase
+          .from('users')
+          .select('id, display_name, email, user_type, avatar')
+          .eq('id', post.user_id)
+          .single();
+        let avatar = user?.avatar || '/placeholder.svg';
+        // Ensure avatar is a full URL if not already
+        if (avatar && !avatar.startsWith('http')) {
+          avatar = `https://trofify-media.s3.amazonaws.com/${avatar}`;
+        }
+        // Optionally, fetch sport info
+        let sport = null;
+        if (user && user.user_type === 'athlete') {
+          const { data: athleteData } = await supabase
+            .from('athletes')
+            .select('sport')
+            .eq('user_id', user.id)
+            .single();
+          sport = athleteData?.sport;
+        } else if (user && user.user_type === 'coach') {
+          const { data: coachData } = await supabase
+            .from('coaches')
+            .select('sport')
+            .eq('user_id', user.id)
+            .single();
+          sport = coachData?.sport;
+        }
+        // Get counts for likes, comments, shares
+        const { count: likesCount } = await supabase
+          .from('post_likes')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', post.id);
+
+        const { count: commentsCount } = await supabase
+          .from('post_comments')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', post.id);
+
+        const { count: sharesCount } = await supabase
+          .from('post_shares')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', post.id);
+
+        // Check if the current user has liked this post
+        const { data: likeData } = await supabase
+          .from('post_likes')
+          .select('id')
+          .eq('post_id', post.id)
+          .eq('user_id', user_id)
+          .single();
+
+        // Parse images array if present
+        let images = [];
+        if (post.images) {
+          if (Array.isArray(post.images)) {
+            images = post.images;
+          } else if (typeof post.images === 'string') {
+            try {
+              images = JSON.parse(post.images);
+            } catch {}
+          }
+        }
+        
+        // Ensure media_url is a full URL if present
+        let mediaUrl = post.media_url || '';
+        if (mediaUrl && !mediaUrl.startsWith('http')) {
+          mediaUrl = `https://trofify-media.s3.amazonaws.com/${mediaUrl}`;
+        }
+        
+        // Ensure images are full URLs
+        const fullUrlImages = images.map(img => {
+          if (img && !img.startsWith('http')) {
+            return `https://trofify-media.s3.amazonaws.com/${img}`;
+          }
+          return img;
+        });
+
+        return {
+          id: post.id,
+          user_id: post.user_id,
+          author_name: user?.display_name || user?.email || 'Unknown',
+          email: user?.email,
+          avatar,
+          user_type: user?.user_type,
+          sport,
+          description: post.description,
+          content: post.content,
+          image: mediaUrl,
+          media_url: mediaUrl,
+          images: fullUrlImages,
+          created_at: post.created_at,
+          likes: likesCount || 0,
+          comments: commentsCount || 0,
+          shares: sharesCount || 0,
+          category: sport || user?.user_type,
+          isLiked: !!likeData,
+          isSaved: true, // These are saved posts, so always true
+        };
+      })
+    );
+    res.json(enrichedPosts.filter(Boolean));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -795,7 +1125,432 @@ app.get('/api/users/:user_id/media', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
+// Search users
+app.get('/api/users/search', async (req, res) => {
+  try {
+    const { q, current_user_id } = req.query;
+    
+    if (!q || !current_user_id) {
+      return res.status(400).json({ error: 'Search query and current user ID are required' });
+    }
+
+    // Search users by display name or email, excluding the current user
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, display_name, email, avatar, user_type')
+      .or(`display_name.ilike.%${q}%,email.ilike.%${q}%`)
+      .neq('id', current_user_id)
+      .limit(20);
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === NOTIFICATION ENDPOINTS ===
+
+// Get notifications for a user
+app.get('/api/notifications/:user_id', async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    const { limit = 30, offset = 0 } = req.query;
+
+    const { data, error } = await supabase
+      .from('notifications')
+      .select(`
+        *,
+        actor:users!notifications_actor_id_fkey(id, display_name, email, avatar, user_type),
+        post:posts!notifications_post_id_fkey(
+          id, 
+          description, 
+          images, 
+          media_url, 
+          media_type, 
+          created_at,
+          user_id
+        )
+      `)
+      .eq('user_id', user_id)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+    if (error) throw error;
+
+    // Fetch post owner information for each notification
+    const notificationsWithPostOwner = await Promise.all(
+      data.map(async (notification) => {
+        if (notification.post && notification.post.user_id) {
+          const { data: postOwner, error: ownerError } = await supabase
+            .from('users')
+            .select('id, display_name, email, avatar, user_type')
+            .eq('id', notification.post.user_id)
+            .single();
+
+          if (!ownerError && postOwner) {
+            return {
+              ...notification,
+              post: {
+                ...notification.post,
+                author_name: postOwner.display_name,
+                author_email: postOwner.email,
+                avatar: postOwner.avatar,
+                user_type: postOwner.user_type,
+                category: postOwner.user_type
+              }
+            };
+          }
+        }
+        return notification;
+      })
+    );
+
+    res.json(notificationsWithPostOwner);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get unread notification count
+app.get('/api/notifications/:user_id/unread-count', async (req, res) => {
+  try {
+    const { user_id } = req.params;
+
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user_id)
+      .eq('is_read', false);
+
+    if (error) throw error;
+    res.json({ count: count || 0 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Mark notification as read
+app.put('/api/notifications/:notification_id/read', async (req, res) => {
+  try {
+    const { notification_id } = req.params;
+
+    const { error } = await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', parseInt(notification_id));
+
+    if (error) throw error;
+    res.json({ message: 'Notification marked as read' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Mark all notifications as read for a user
+app.put('/api/notifications/:user_id/read-all', async (req, res) => {
+  try {
+    const { user_id } = req.params;
+
+    const { error } = await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', user_id)
+      .eq('is_read', false);
+
+    if (error) throw error;
+    res.json({ message: 'All notifications marked as read' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete a notification
+app.delete('/api/notifications/:notification_id', async (req, res) => {
+  try {
+    const { notification_id } = req.params;
+
+    const { error } = await supabase
+      .from('notifications')
+      .delete()
+      .eq('id', parseInt(notification_id));
+
+    if (error) throw error;
+    res.json({ message: 'Notification deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== MESSAGING SYSTEM ENDPOINTS =====
+
+// Get or create conversation between two users
+app.post('/api/conversations', async (req, res) => {
+  try {
+    const { user1_id, user2_id } = req.body;
+    
+    console.log('Creating conversation between users:', { user1_id, user2_id });
+    
+    if (!user1_id || !user2_id) {
+      return res.status(400).json({ error: 'Both user IDs are required' });
+    }
+
+    // Use the database function to get or create conversation
+    console.log('Calling get_or_create_conversation function...');
+    const { data: conversationId, error } = await supabase.rpc('get_or_create_conversation', {
+      user1_uuid: user1_id,
+      user2_uuid: user2_id
+    });
+
+    console.log('Function result:', { conversationId, error });
+
+    if (error) {
+      console.error('Database function error:', error);
+      throw error;
+    }
+
+    // Get the conversation details
+    console.log('Fetching conversation details for ID:', conversationId);
+    const { data: conversation, error: convError } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('id', conversationId)
+      .single();
+
+    console.log('Conversation details:', { conversation, convError });
+
+    if (convError) throw convError;
+
+    res.json(conversation);
+  } catch (error) {
+    console.error('Error in conversation creation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get user's conversations
+app.get('/api/users/:user_id/conversations', async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    
+    // Get conversations where user is either user1 or user2
+    const { data: conversations, error } = await supabase
+      .from('conversations')
+      .select(`
+        *,
+        user1:users!conversations_user1_id_fkey(id, display_name, email, avatar, user_type),
+        user2:users!conversations_user2_id_fkey(id, display_name, email, avatar, user_type)
+      `)
+      .or(`user1_id.eq.${user_id},user2_id.eq.${user_id}`)
+      .order('last_message_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Transform conversations to include the other user's info and additional data
+    const transformedConversations = await Promise.all(conversations.map(async (conv) => {
+      const otherUser = conv.user1_id === user_id ? conv.user2 : conv.user1;
+      
+      // Get unread message count for this user
+      const { count: unreadCount } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('conversation_id', conv.id)
+        .eq('receiver_id', user_id)
+        .eq('is_read', false);
+      
+      // Get the last message content
+      const { data: lastMessage } = await supabase
+        .from('messages')
+        .select('content')
+        .eq('conversation_id', conv.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      return {
+        id: conv.id,
+        other_user: otherUser,
+        created_at: conv.created_at,
+        updated_at: conv.updated_at,
+        last_message_at: conv.last_message_at,
+        unread_count: unreadCount > 0 ? unreadCount : null,
+        last_message: lastMessage?.content || null
+      };
+    }));
+
+    res.json(transformedConversations);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get messages for a conversation
+app.get('/api/conversations/:conversation_id/messages', async (req, res) => {
+  try {
+    const { conversation_id } = req.params;
+    const { page = 1, limit = 50 } = req.query;
+    
+    const offset = (page - 1) * limit;
+
+    const { data: messages, error } = await supabase
+      .from('messages')
+      .select(`
+        *,
+        sender:users!messages_sender_id_fkey(id, display_name, email, avatar, user_type),
+        receiver:users!messages_receiver_id_fkey(id, display_name, email, avatar, user_type)
+      `)
+      .eq('conversation_id', conversation_id)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) throw error;
+
+    // Reverse the order to show oldest first
+    const reversedMessages = messages.reverse();
+
+    res.json(reversedMessages);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Send a message
+app.post('/api/conversations/:conversation_id/messages', async (req, res) => {
+  try {
+    const { conversation_id } = req.params;
+    const { sender_id, receiver_id, content } = req.body;
+
+    console.log('Sending message:', { conversation_id, sender_id, receiver_id, content });
+
+    if (!sender_id || !receiver_id || !content) {
+      return res.status(400).json({ error: 'Sender ID, receiver ID, and content are required' });
+    }
+
+    // First, verify the conversation exists
+    console.log('Verifying conversation exists...');
+    const { data: existingConversation, error: convCheckError } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', conversation_id)
+      .single();
+
+    console.log('Conversation check:', { existingConversation, convCheckError });
+
+    if (convCheckError || !existingConversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    const { data: message, error } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id,
+        sender_id,
+        receiver_id,
+        content: content.trim()
+      })
+      .select(`
+        *,
+        sender:users!messages_sender_id_fkey(id, display_name, email, avatar, user_type),
+        receiver:users!messages_receiver_id_fkey(id, display_name, email, avatar, user_type)
+      `)
+      .single();
+
+    console.log('Message insert result:', { message, error });
+
+    if (error) throw error;
+
+    res.json(message);
+  } catch (error) {
+    console.error('Error sending message:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Mark messages as read
+app.put('/api/conversations/:conversation_id/messages/read', async (req, res) => {
+  try {
+    const { conversation_id } = req.params;
+    const { user_id } = req.body;
+
+    const { error } = await supabase
+      .from('messages')
+      .update({ is_read: true })
+      .eq('conversation_id', conversation_id)
+      .eq('receiver_id', user_id)
+      .eq('is_read', false);
+
+    if (error) throw error;
+
+    res.json({ message: 'Messages marked as read' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get unread message count for a user
+app.get('/api/users/:user_id/unread-messages', async (req, res) => {
+  try {
+    const { user_id } = req.params;
+
+    const { count, error } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('receiver_id', user_id)
+      .eq('is_read', false);
+
+    if (error) throw error;
+
+    res.json({ count: count || 0 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update typing status
+app.put('/api/conversations/:conversation_id/typing', async (req, res) => {
+  try {
+    const { conversation_id } = req.params;
+    const { user_id, is_typing } = req.body;
+
+    const { data, error } = await supabase
+      .from('typing_status')
+      .upsert({
+        conversation_id,
+        user_id,
+        is_typing,
+        last_typing_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get typing status for a conversation
+app.get('/api/conversations/:conversation_id/typing', async (req, res) => {
+  try {
+    const { conversation_id } = req.params;
+
+    const { data, error } = await supabase
+      .from('typing_status')
+      .select('*')
+      .eq('conversation_id', conversation_id)
+      .eq('is_typing', true);
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 }); 

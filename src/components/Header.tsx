@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { DarkModeToggle } from "@/components/DarkModeToggle";
+import { Notification } from "@/lib/notificationService";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -18,9 +19,11 @@ interface HeaderProps {
   setIsAuthenticated: (auth: boolean) => void;
   userProfile?: any;
   notificationCount?: number;
+  messageCount?: number;
+  onNotificationClick?: (notification: Notification) => void;
 }
 
-export const Header = ({ activeTab, setActiveTab, setIsAuthenticated, userProfile, notificationCount = 0 }: HeaderProps) => {
+export const Header = ({ activeTab, setActiveTab, setIsAuthenticated, userProfile, notificationCount = 0, messageCount = 0, onNotificationClick }: HeaderProps) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -84,8 +87,10 @@ export const Header = ({ activeTab, setActiveTab, setIsAuthenticated, userProfil
                   {item.id === "notifications" && notificationCount > 0 && (
                     <Badge className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground text-xs h-4 w-4 p-0 flex items-center justify-center rounded-full">{notificationCount}</Badge>
                   )}
-                  {item.id === "messages" && (
-                    <Badge className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground text-xs h-4 w-4 p-0 flex items-center justify-center rounded-full">5</Badge>
+                  {item.id === "messages" && messageCount > 0 && (
+                    <Badge className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground text-xs h-4 w-4 p-0 flex items-center justify-center rounded-full">
+                      {messageCount > 99 ? "99+" : messageCount}
+                    </Badge>
                   )}
                 </Button>
               ))}

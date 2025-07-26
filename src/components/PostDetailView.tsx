@@ -49,7 +49,7 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
   const fetchActionCounts = async () => {
     setActionsLoading(true);
     try {
-      const res = await axios.get(`http://localhost:5000/api/posts/${post.id}/actions`);
+      const res = await axios.get(`${getBackendUrl()}/api/posts/${post.id}/actions`);
       setLikeUsers(res.data.likes || []);
       setShareUsers(res.data.shares || []);
       setSaveUsers(res.data.saves || []);
@@ -92,9 +92,9 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
   const handleLike = async () => {
     try {
       if (!liked) {
-        await axios.post(`http://localhost:5000/api/posts/${post.id}/like`, { userId });
+        await axios.post(`${getBackendUrl()}/api/posts/${post.id}/like`, { userId });
       } else {
-        await axios.delete(`http://localhost:5000/api/posts/${post.id}/like`, { data: { userId } });
+        await axios.delete(`${getBackendUrl()}/api/posts/${post.id}/like`, { data: { userId } });
       }
       await fetchActionCounts();
     } catch (err) {
@@ -105,10 +105,10 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
   const handleSave = async () => {
     try {
       if (!saved) {
-        await axios.post(`http://localhost:5000/api/posts/${post.id}/save`, { userId });
+        await axios.post(`${getBackendUrl()}/api/posts/${post.id}/save`, { userId });
         toast({ title: "Post saved", description: "This post was added to your Saved Posts." });
       } else {
-        await axios.delete(`http://localhost:5000/api/posts/${post.id}/save`, { data: { userId } });
+        await axios.delete(`${getBackendUrl()}/api/posts/${post.id}/save`, { data: { userId } });
         toast({ title: "Post unsaved", description: "This post was removed from your Saved Posts." });
       }
       setSaved(!saved);
@@ -140,10 +140,10 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
     if (onProfileClick) {
       onProfileClick({
         id: post.user_id,
-        name: post.author_name,
-        username: `@${post.author_name?.toLowerCase().replace(/\s+/g, '')}`,
+        name: post.author_name || post.display_name,
+        username: `@${(post.author_name || post.display_name || post.email)?.toLowerCase().replace(/\s+/g, '')}`,
         avatar: post.avatar || "/placeholder.svg",
-        sport: post.category,
+        sport: post.category || post.user_type,
         verified: false,
         bio: `Professional ${post.category || post.user_type} User`,
         coverImage: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
@@ -206,7 +206,9 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
                 onClick={handleProfileClick}
               >
                 <AvatarImage src={getAvatarUrl(post.avatar)} />
-                <AvatarFallback>{post.author_name?.[0] || "U"}</AvatarFallback>
+                <AvatarFallback>
+                  {(post.author_name || post.display_name || post.email || "U")[0]}
+                </AvatarFallback>
               </Avatar>
               <div>
                 <div className="flex items-center space-x-2">
@@ -214,11 +216,13 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
                     className="font-semibold text-foreground cursor-pointer hover:underline"
                     onClick={handleProfileClick}
                   >
-                    {post.author_name || post.email}
+                    {post.author_name || post.display_name || post.email || "Unknown User"}
                   </span>
-                  <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
-                    {post.category || post.user_type}
-                  </Badge>
+                  {(post.category || post.user_type) && (
+                    <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
+                      {post.category || post.user_type}
+                    </Badge>
+                  )}
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {formatDate(post.created_at)}
@@ -235,18 +239,18 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
           </div>
 
           {/* Post Media */}
-          {(post.media_url || post.image) && (
+          {(post.media_url || post.image || post.images) && (
             <div className="border-b-2 border-border">
               {post.media_type === 'video' ? (
                 <video
-                  src={`https://trofify-media.s3.amazonaws.com/${post.media_url}`}
+                  src={post.media_url.startsWith('http') ? post.media_url : `https://trofify-media.s3.amazonaws.com/${post.media_url}`}
                   controls
                   className="w-full object-cover"
                   style={{ maxHeight: '60vh' }}
                 />
               ) : (
                 <img
-                  src={post.image || `https://trofify-media.s3.amazonaws.com/${post.media_url}`}
+                  src={post.image || (post.images && post.images.length > 0 ? post.images[0] : (post.media_url?.startsWith('http') ? post.media_url : `https://trofify-media.s3.amazonaws.com/${post.media_url}`))}
                   alt="Post content"
                   className="w-full object-cover"
                   style={{ maxHeight: '60vh' }}
@@ -321,13 +325,15 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
             {commentUsers.slice(0, 3).map((comment, index) => (
               <div key={index} className="flex items-start space-x-3 mb-3">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="/placeholder.svg" />
-                  <AvatarFallback>{comment.email?.[0] || "U"}</AvatarFallback>
+                  <AvatarImage src={getAvatarUrl(comment.users?.avatar || comment.avatar)} />
+                  <AvatarFallback>
+                    {(comment.users?.display_name || comment.users?.email || comment.display_name || comment.email || "U")[0]}
+                  </AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
                   <div className="bg-muted rounded-lg p-3">
                     <div className="font-semibold text-sm text-foreground">
-                      {comment.email}
+                      {comment.users?.display_name || comment.users?.email || comment.display_name || comment.email}
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {comment.comment}

@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { Notification } from "@/lib/notificationService";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -32,7 +33,9 @@ interface MobileHeaderProps {
   setActiveTab: (tab: string) => void;
   setIsAuthenticated: (auth: boolean) => void;
   userProfile?: any;
-  notificationCount?: number; // <-- Add this line
+  notificationCount?: number;
+  messageCount?: number;
+  onNotificationClick?: (notification: Notification) => void;
 }
 
 export const MobileHeader = ({
@@ -40,7 +43,9 @@ export const MobileHeader = ({
   setActiveTab,
   setIsAuthenticated,
   userProfile,
-  notificationCount = 0, // <-- Add this line
+  notificationCount = 0,
+  messageCount = 0,
+  onNotificationClick,
 }: MobileHeaderProps) => {
   const [showSidebar, setShowSidebar] = useState(false);
 
@@ -56,13 +61,7 @@ export const MobileHeader = ({
     };
   }, [showSidebar]);
 
-  // Update navigationIcons for mobile navigation
-  const navigationIcons = [
-    { id: "home", icon: Home, label: "Home" },
-    { id: "search", icon: Search, label: "Search" },
-    { id: "notifications", icon: Bell, label: "Notification" },
-    { id: "messages", icon: MessageSquare, label: "Message" },
-  ];
+  // Navigation icons moved to footer - keeping only essential header elements
 
   const sidebarMenuItems = [
     {
@@ -194,30 +193,7 @@ export const MobileHeader = ({
           </div>
         </div>
 
-        {/* Second Row - Navigation Icons */}
-        <div className="flex items-center h-12">
-          {navigationIcons.map((item) => (
-            <Button
-              key={item.id}
-              variant="ghost"
-              size="sm"
-              onClick={() => setActiveTab(item.id)}
-              className={`flex flex-col items-center justify-center h-full flex-1 rounded-none hover:bg-muted/50 ${activeTab === item.id ? "text-[#0e9591] border-b-2 border-[#0e9591]" : "text-muted-foreground"}`}
-            >
-              <item.icon
-                className={`h-6 w-6 ${activeTab === item.id ? "text-[#0e9591]" : "text-muted-foreground"}`}
-              />
-              {/* Show badge for notifications and messages */}
-              {item.id === "notifications" && notificationCount > 0 && (
-                <Badge className="absolute top-1 right-3 bg-destructive text-destructive-foreground text-xs h-4 w-4 p-0 flex items-center justify-center rounded-full">{notificationCount}</Badge>
-              )}
-              {item.id === "messages" && (
-                <Badge className="absolute top-1 right-3 bg-destructive text-destructive-foreground text-xs h-4 w-4 p-0 flex items-center justify-center rounded-full">5</Badge>
-              )}
-              <span className="text-xs mt-1">{item.label}</span>
-            </Button>
-          ))}
-        </div>
+
       </header>
 
       {/* Sidebar Overlay */}

@@ -17,6 +17,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { PostActions } from "./PostActions";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+} from "@/components/ui/carousel";
 
 interface PostCardProps {
   post: any;
@@ -31,6 +36,7 @@ interface PostCardProps {
 }
 
 export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onSaveChange, onDelete, onPostClick, isSaved = false, variant = 'list' }: PostCardProps) => {
+  console.log('PostCard userId:', userId, 'for post', post.id);
   const [liked, setLiked] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -82,6 +88,24 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
     if (avatar.startsWith("http")) return avatar;
     return `https://trofify-media.s3.amazonaws.com/${avatar}`;
   };
+
+  // Helper to get all images for the post
+  const getImages = () => {
+    // Support both single image (string) and multiple images (array)
+    if (Array.isArray(post.images) && post.images.length > 0) return post.images;
+    if (typeof post.images === 'string') {
+      try {
+        const arr = JSON.parse(post.images);
+        if (Array.isArray(arr)) return arr;
+      } catch {}
+    }
+    if (post.image) return [post.image];
+    if (post.media_url) return [post.media_url];
+    return [];
+  };
+  const images = getImages();
+  console.log('PostCard images:', images, 'Post data:', post);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   return (
     <div
@@ -166,19 +190,64 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
         >
           {post.content}
         </p>
-        {post.image && (
-          <img
-            src={post.image}
-            alt="Post content"
+        {images.length > 1 ? (
+          <div className="relative w-full">
+            <Carousel
+              className="w-full"
+              opts={{ loop: true }}
+              setApi={api => {
+                if (api) {
+                  api.on("select", () => setCurrentIndex(api.selectedScrollSnap()));
+                }
+              }}
+            >
+              <CarouselContent className="w-full">
+                {images.map((img: string, idx: number) => (
+                  <CarouselItem key={idx}>
+                    <div 
+                      className={
+                        variant === 'grid'
+                          ? 'w-full aspect-square bg-gray-100 rounded-md mb-2 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden'
+                          : 'w-full aspect-square bg-gray-100 rounded-none lg:rounded-lg m-0 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden'
+                      }
+                      onClick={() => onPostClick && onPostClick(post)}
+                    >
+                      <img
+                        src={img}
+                        alt={`Post image ${idx + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  </CarouselItem>
+                ))}
+              </CarouselContent>
+            </Carousel>
+            {/* Pagination dots */}
+            <div className="flex justify-center mt-2 space-x-1">
+              {images.map((_, idx) => (
+                <span
+                  key={idx}
+                  className={`inline-block w-2 h-2 rounded-full transition-all duration-200 ${idx === currentIndex ? 'bg-[#0e9591]' : 'bg-muted-foreground/30'}`}
+                />
+              ))}
+            </div>
+          </div>
+        ) : images.length === 1 ? (
+          <div 
             className={
               variant === 'grid'
-                ? 'w-full h-40 object-cover rounded-md mb-2 cursor-pointer hover:opacity-90 transition-opacity'
-                : 'w-full h-48 object-cover rounded-none lg:rounded-lg m-0 cursor-pointer hover:opacity-90 transition-opacity'
+                ? 'w-full aspect-square bg-gray-100 rounded-md mb-2 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden'
+                : 'w-full aspect-square bg-gray-100 rounded-none lg:rounded-lg m-0 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden'
             }
-            style={variant === 'grid' ? { minHeight: 120, maxHeight: 180 } : {}}
             onClick={() => onPostClick && onPostClick(post)}
-          />
-        )}
+          >
+            <img
+              src={images[0]}
+              alt="Post content"
+              className="w-full h-full object-cover"
+            />
+          </div>
+        ) : null}
       </div>
 
       {/* Actions */}
@@ -189,7 +258,8 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
           initialLikes={post.likes}
           initialComments={post.comments}
           initialShares={post.shares}
-          initialSaved={isSaved}
+          initialSaved={post.isSaved}
+          initialLiked={post.isLiked}
           onProfileClick={onProfileClick}
           onSaveChange={onSaveChange}
         />

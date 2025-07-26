@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { MobileHeader } from "@/components/MobileHeader";
+import { MobileFooter } from "@/components/MobileFooter";
 import { Sidebar } from "@/components/Sidebar";
 import { Feed } from "@/components/Feed";
 import { RightPanel } from "@/components/RightPanel";
 import { StoriesBar } from "@/components/StoriesBar";
 import { ReelsView } from "@/components/ReelsView";
-import { NotificationsView } from "@/components/NotificationsView";
 import { MessagesView } from "@/components/MessagesView";
 import { ProfileView } from "@/components/ProfileView";
 import { NetworkView } from "@/components/NetworkView";
@@ -22,6 +22,9 @@ import { Header } from "@/components/Header";
 import { getSocket } from "@/lib/socket";
 import { getBackendUrl } from "@/lib/utils";
 import { PostDetailView } from "@/components/PostDetailView";
+import { Notification } from "@/lib/notificationService";
+import { NotificationsPage } from "@/components/NotificationsPage";
+import { useRealTimeMessages } from "@/hooks/use-mobile";
 
 const Index = () => {
   // All hooks must be at the top - no conditional hooks
@@ -37,6 +40,15 @@ const Index = () => {
   const [profiles, setProfiles] = useState<Record<string, any>>({});
   const [viewingPost, setViewingPost] = useState<any | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
+  const [notificationCount, setNotificationCount] = useState(0);
+  const [targetUserId, setTargetUserId] = useState<string | null>(null);
+
+  // Use real-time message hook
+  const { messageCount, refreshMessageCount } = useRealTimeMessages(
+    userProfile?.id, 
+    activeTab === 'messages' || activeTab === 'home'
+  );
 
   // All callbacks and memoized values
   const handleAuthSuccess = useCallback((email?: string) => {
@@ -152,6 +164,20 @@ const Index = () => {
     setActiveTab('profile');
   }, []);
 
+  const handleNotificationClick = useCallback((notification: Notification) => {
+    console.log('Notification clicked:', notification);
+    
+    // If notification has a post, open the post detail view
+    if (notification.post) {
+      console.log('Setting viewing post:', notification.post);
+      setViewingPost(notification.post);
+      setActiveTab("post-detail");
+    } else {
+      console.error('Notification does not have post data:', notification);
+    }
+    setSelectedNotification(notification);
+  }, []);
+
   const handleLogout = useCallback(() => {
     setIsAuthenticated(false);
     setUserEmail(null);
@@ -228,6 +254,60 @@ const Index = () => {
     return null;
   }, [userProfile, isAuthenticated, userEmail]);
 
+  const fetchNotificationCount = useCallback(async () => {
+    if (!effectiveUser?.id) return;
+    
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/notifications/${effectiveUser.id}/unread-count`);
+      if (response.ok) {
+        const data = await response.json();
+        setNotificationCount(data.count || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching notification count:', error);
+    }
+  }, [effectiveUser?.id]);
+
+  const handleNavigateToMessages = useCallback((userId?: string) => {
+    if (userId) {
+      setTargetUserId(userId);
+    }
+    setActiveTab('messages');
+  }, []);
+
+  const handleClearTargetUser = useCallback(() => {
+    setTargetUserId(null);
+  }, []);
+
+  const handleRefreshConversations = useCallback(() => {
+    // Trigger immediate refresh of message count and conversations
+    refreshMessageCount();
+  }, [refreshMessageCount]);
+
+  // Add a more frequent polling for message count when user is active
+  useEffect(() => {
+    fetchNotificationCount();
+    refreshMessageCount();
+    
+    // Set up polling for notification and message counts
+    const interval = setInterval(() => {
+      fetchNotificationCount();
+      refreshMessageCount();
+    }, 30000); // Poll every 30 seconds
+
+    // Set up more frequent polling for message count when user is on messages tab
+    const messageInterval = setInterval(() => {
+      if (activeTab === 'messages') {
+        refreshMessageCount();
+      }
+    }, 5000); // Poll every 5 seconds when on messages tab
+
+    return () => {
+      clearInterval(interval);
+      clearInterval(messageInterval);
+    };
+  }, [fetchNotificationCount, refreshMessageCount, activeTab]);
+
   // Memoized main content
   const mainContent = useMemo(() => {
     switch (activeTab) {
@@ -257,15 +337,23 @@ const Index = () => {
       case "reels":
         return <ReelsView onProfileClick={handleProfileClick} />;
       case "notifications":
-        return <NotificationsView 
-          onProfileClick={handleProfileClick} 
-          userId={effectiveUser?.id}
-          notifications={notifications}
-          profiles={profiles}
-          setNotifications={setNotifications}
-        />;
+        return (
+          <NotificationsPage
+            userId={effectiveUser?.id}
+            onBack={() => setActiveTab("home")}
+            onNotificationClick={handleNotificationClick}
+          />
+        );
       case "messages":
-        return <MessagesView onProfileClick={handleProfileClick} />;
+        return (
+          <MessagesView
+            onProfileClick={handleProfileClick}
+            currentUserId={effectiveUser?.id}
+            targetUserId={targetUserId}
+            onClearTargetUser={handleClearTargetUser}
+            onRefreshConversations={handleRefreshConversations}
+          />
+        );
       case "profile":
         return (
           <ProfileView
@@ -274,6 +362,7 @@ const Index = () => {
             onSaveChange={handleSaveChange}
             onProfileClick={handleProfileClick}
             onBack={() => setActiveTab("home")}
+            onNavigateToMessages={handleNavigateToMessages}
           />
         );
       case "network":
@@ -296,6 +385,7 @@ const Index = () => {
             post={viewingPost}
             onBack={() => setActiveTab("home")}
             userId={effectiveUser?.id}
+            onProfileClick={handleProfileClick}
           />
         ) : null;
       default:
@@ -329,10 +419,15 @@ const Index = () => {
     storiesRefreshTrigger,
     viewingPost,
     handleProfileClick,
+    handleNotificationClick,
     handleSaveChange,
     notifications,
     profiles,
     effectiveUser,
+    fetchNotificationCount,
+    targetUserId,
+    handleClearTargetUser,
+    handleRefreshConversations,
   ]);
 
   // Conditional rendering AFTER all hooks
@@ -364,7 +459,9 @@ const Index = () => {
           activeTab={activeTab}
           setActiveTab={handleTabChange}
           setIsAuthenticated={handleLogout}
-          notificationCount={unreadCount}
+          notificationCount={notificationCount}
+          messageCount={messageCount}
+          onNotificationClick={handleNotificationClick}
         />
       </div>
 
@@ -375,7 +472,9 @@ const Index = () => {
           activeTab={activeTab}
           setActiveTab={handleTabChange}
           setIsAuthenticated={handleLogout}
-          notificationCount={unreadCount}
+          notificationCount={notificationCount}
+          messageCount={messageCount}
+          onNotificationClick={handleNotificationClick}
         />
       </div>
 
@@ -394,7 +493,7 @@ const Index = () => {
 
         {/* Main Content Area */}
         <div className="flex-1 lg:ml-64 xl:mr-80 min-h-[calc(100vh-4rem)] w-full">
-          <main className="w-full pt-24 md:pt-16 lg:px-4 lg:max-w-2xl lg:mx-auto px-0 mx-0 pb-16 md:pb-0">
+          <main className="w-full pt-12 md:pt-16 lg:px-4 lg:max-w-2xl lg:mx-auto px-0 mx-0 pb-20 md:pb-0">
             {mainContent}
           </main>
         </div>
@@ -406,6 +505,17 @@ const Index = () => {
           </div>
         </div>
       </div>
+
+      {/* Mobile Footer */}
+      <MobileFooter
+        activeTab={activeTab}
+        setActiveTab={handleTabChange}
+        setIsAuthenticated={setIsAuthenticated}
+        userProfile={effectiveUser}
+        notificationCount={notificationCount}
+        messageCount={messageCount}
+        onNotificationClick={handleNotificationClick}
+      />
 
       {/* Modals */}
       {activeTab === 'create-post' && (

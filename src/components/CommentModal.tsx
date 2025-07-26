@@ -4,6 +4,8 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { getBackendUrl } from "@/lib/utils";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { UniversalLoader } from "@/components/ui/universal-loader";
 
 interface CommentModalProps {
   open: boolean;
@@ -22,6 +24,9 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
   const [loading, setLoading] = useState(false);
   const [profiles, setProfiles] = useState<Record<string, any>>({}); // email/user_id -> profile
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
+  const commentsContainerRef = useRef<HTMLDivElement>(null);
+  const [isScrollable, setIsScrollable] = useState(false);
 
   useEffect(() => {
     setIsMobile(window.innerWidth <= 768);
@@ -33,43 +38,45 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
     if (open) fetchComments();
     // eslint-disable-next-line
   }, [open]);
+  useEffect(() => {
+    // After comments render, check if container height exceeds 50vh
+    if (commentsContainerRef.current) {
+      const maxHeight = window.innerHeight * 0.5;
+      setIsScrollable(commentsContainerRef.current.scrollHeight > maxHeight);
+    }
+  }, [comments, expandedComments]);
+  // --- CommentModal: Handles displaying, adding, and deleting comments for a post. ---
+  // Fetches all comments for the post and updates local state. Uses joined users object for avatar/name/profile.
   const fetchComments = async () => {
     setLoading(true);
-    const res = await axios.get(`${getBackendUrl()}/api/posts/${postId}/actions`);
-    setComments(res.data.comments || []);
-    // Fetch missing profiles for commenters
-    const uniqueEmails = Array.from(new Set((res.data.comments || []).map(c => c.email)));
-    const newProfiles = { ...profiles };
-    await Promise.all(uniqueEmails.map(async (email: string) => {
-      if (!newProfiles[email]) {
-        try {
-          const profileRes = await fetch(`${getBackendUrl()}/signup/profile`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email }),
-          });
-          if (profileRes.ok) {
-            const profile = await profileRes.json();
-            newProfiles[email] = profile;
-          }
-        } catch {}
-      }
-    }));
-    setProfiles(newProfiles);
-    console.log("CommentModal - Fetched profiles:", newProfiles);
-    setLoading(false);
+    try {
+      const res = await axios.get(`${getBackendUrl()}/api/posts/${postId}/comments`);
+      setComments(res.data || []);
+      setLoading(false);
+    } catch (e) {
+      setLoading(false);
+      console.error('Failed to fetch comments:', e);
+    }
   };
+  // Adds a new comment and refreshes the comment list
   const handleAddComment = async () => {
     if (!commentText.trim()) return;
-    await axios.post(`${getBackendUrl()}/api/posts/${postId}/comment`, { userId, comment: commentText });
-    setCommentText("");
-    fetchComments();
-    if (onCommentAdded) onCommentAdded();
+    try {
+      // Use user_id (snake_case) to match backend
+      await axios.post(`${getBackendUrl()}/api/posts/${postId}/comments`, { user_id: userId, comment: commentText });
+      setCommentText("");
+      await fetchComments();
+      if (onCommentAdded) onCommentAdded();
+    } catch (e) { console.error('Failed to add comment:', e); }
   };
+  // Deletes a comment and refreshes the comment list
   const handleDeleteComment = async (commentId) => {
-    await axios.delete(`${getBackendUrl()}/api/posts/${postId}/comment/${commentId}`, { data: { userId } });
-    fetchComments();
-    if (onCommentDeleted) onCommentDeleted();
+    try {
+      // Use user_id (snake_case) to match backend
+      await axios.delete(`${getBackendUrl()}/api/posts/${postId}/comment/${commentId}`, { data: { user_id: userId } });
+      await fetchComments();
+      if (onCommentDeleted) onCommentDeleted();
+    } catch (e) { console.error('Failed to delete comment:', e); }
   };
   // Long press for mobile, menu for desktop
   const handleCommentPress = (comment, e) => {
@@ -81,25 +88,11 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
   };
   // Helper function to get display name based on user type
-  const getDisplayName = (email: string) => {
-    const profile = profiles[email];
-    if (!profile) return email.split('@')[0]; // Fallback to email username
-    
-    // Return appropriate name based on user type
-    switch (profile.user_type) {
-      case 'athlete':
-        return profile.name || profile.full_name || email.split('@')[0];
-      case 'coach':
-        return profile.name || profile.full_name || email.split('@')[0];
-      case 'fan':
-        return profile.name || profile.full_name || email.split('@')[0];
-      case 'venue':
-        return profile.name || profile.venue_name || email.split('@')[0];
-      case 'sports_brand':
-        return profile.name || profile.brand_name || email.split('@')[0];
-      default:
-        return profile.name || email.split('@')[0];
-    }
+  const getDisplayName = (comment) => {
+    // Use display_name from joined users object, fallback to email or 'User'
+    if (comment.users && comment.users.display_name) return comment.users.display_name;
+    if (comment.users && comment.users.email) return comment.users.email.split('@')[0];
+    return 'User';
   };
 
   // Helper function to check if profile is still loading
@@ -107,72 +100,103 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
     return !profiles[email] && loading;
   };
 
-  const handleAvatarClick = (comment: any) => {
-    if (onProfileClick) {
-      const profile = profiles[comment.email as string] || { 
-        id: comment.user_id,
-        email: comment.email,
-        name: (comment.email as string).split('@')[0],
-        user_type: 'user'
+  // Helper to get the correct avatar URL (copied from ProfileView)
+  const getAvatarUrl = (avatar?: string) => {
+    if (!avatar) return "/placeholder.svg";
+    if (avatar.startsWith("http")) return avatar;
+    if (avatar.startsWith("/")) return avatar;
+    return `https://trofify-media.s3.amazonaws.com/${avatar}`;
+  };
+
+  // Handles navigation to user profile when avatar or name is clicked
+  const handleAvatarClick = (comment) => {
+    if (onProfileClick && comment.users) {
+      // Pass a profile object with a valid avatar URL
+      const profile = {
+        ...comment.users,
+        avatar: getAvatarUrl(comment.users.avatar)
       };
       onOpenChange(false);
       setTimeout(() => onProfileClick(profile), 200);
     }
   };
-  const renderComments = () => (
-    <div className="flex-1 overflow-y-auto px-4 py-2">
-      {loading ? (
-        <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
-          <svg className="animate-spin" width="40" height="40" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="#0e9591" strokeWidth="5" strokeDasharray="31.4 31.4"/></svg>
-          <div className="mt-2 font-semibold">Loading comments...</div>
-        </div>
-      ) : comments.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
-          <svg width="64" height="64" fill="none"><rect width="64" height="64" rx="16" fill="currentColor" opacity="0.1"/><text x="32" y="38" textAnchor="middle" fontSize="14" fill="currentColor" opacity="0.5">💬</text></svg>
-          <div className="mt-2 font-semibold">No comments yet</div>
-          <div className="text-sm">Be the first to comment.</div>
-        </div>
-      ) : (
-        comments.map(comment => (
-          <div
-            key={comment.id}
-            className="flex items-start gap-3 py-2 border-b border-border"
-            onTouchStart={e => handleCommentPress(comment, e)}
-            onTouchEnd={handleCommentRelease}
-            onMouseDown={e => !isMobile && comment.user_id === userId && e.button === 2 && handleDeleteComment(comment.id)}
-          >
-            <img src={(profiles[comment.email as string]?.avatar) || "/placeholder.svg"} alt={comment.email as string} className="w-8 h-8 rounded-full cursor-pointer" onClick={() => handleAvatarClick(comment)} />
-            <div className="flex-1">
-              <div 
-                className="font-semibold text-sm cursor-pointer hover:underline text-[#0e9591]"
-                onClick={() => {
-                  if (onProfileClick) {
-                    const profile = profiles[comment.email as string] || { 
-                      id: comment.user_id,
-                      email: comment.email,
-                      name: (comment.email as string).split('@')[0],
-                      user_type: 'user'
-                    };
-                    onOpenChange(false);
-                    setTimeout(() => onProfileClick(profile), 200);
-                  }
-                }}
-              >
-                {getDisplayName(comment.email as string)}
-              </div>
-              <div className="text-foreground text-sm">{comment.comment}</div>
-              <div className="text-xs text-muted-foreground">{new Date(comment.created_at).toLocaleString()}</div>
-            </div>
-            {comment.user_id === userId && !isMobile && (
-              <Button size="icon" variant="ghost" onClick={() => handleDeleteComment(comment.id)} title="Delete comment">
-                🗑️
-              </Button>
-            )}
+  const renderComments = () => {
+    return (
+      <div
+        ref={commentsContainerRef}
+        className={
+          `px-4 py-2 transition-all duration-200 ` +
+          (isScrollable
+            ? 'max-h-[50vh] overflow-y-auto scroll-smooth scrollbar-hide'
+            : 'max-h-none overflow-visible')
+        }
+        style={{ minHeight: 0 }}
+      >
+        {loading ? (
+          <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
+            <UniversalLoader count={2} />
           </div>
-        ))
-      )}
-    </div>
-  );
+        ) : comments.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
+            <svg width="64" height="64" fill="none"><rect width="64" height="64" rx="16" fill="currentColor" opacity="0.1"/><text x="32" y="38" textAnchor="middle" fontSize="14" fill="currentColor" opacity="0.5">💬</text></svg>
+            <div className="mt-2 font-semibold">No comments yet</div>
+            <div className="text-sm">Be the first to comment.</div>
+          </div>
+        ) : (
+          comments.map(comment => {
+            const isExpanded = expandedComments[comment.id];
+            return (
+              <div
+                key={comment.id}
+                className="flex items-start space-x-3 mb-4"
+                onTouchStart={e => handleCommentPress(comment, e)}
+                onTouchEnd={handleCommentRelease}
+                onMouseDown={e => !isMobile && comment.user_id === userId && e.button === 2 && handleDeleteComment(comment.id)}
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={getAvatarUrl(comment.users?.avatar)} alt={getDisplayName(comment)} className="object-cover" />
+                  <AvatarFallback>{getDisplayName(comment)[0] || 'U'}</AvatarFallback>
+                </Avatar>
+                <div className="flex-1">
+                  <div 
+                    className="font-semibold text-sm cursor-pointer hover:underline text-[#0e9591]"
+                    onClick={() => handleAvatarClick(comment)}
+                  >
+                    {getDisplayName(comment)}
+                  </div>
+                  <div className={isExpanded ? "text-foreground text-sm" : "text-foreground text-sm line-clamp-4"}>
+                    {comment.comment}
+                  </div>
+                  {!isExpanded && comment.comment && comment.comment.split(/\r?\n| /).length > 20 && (
+                    <button
+                      className="text-xs text-[#0e9591] font-semibold mt-1 focus:outline-none"
+                      onClick={() => setExpandedComments(prev => ({ ...prev, [comment.id]: true }))}
+                    >
+                      Read more
+                    </button>
+                  )}
+                  {isExpanded && comment.comment && comment.comment.split(/\r?\n| /).length > 20 && (
+                    <button
+                      className="text-xs text-[#0e9591] font-semibold mt-1 focus:outline-none"
+                      onClick={() => setExpandedComments(prev => ({ ...prev, [comment.id]: false }))}
+                    >
+                      Show less
+                    </button>
+                  )}
+                  <div className="text-xs text-muted-foreground">{comment.created_at ? new Date(comment.created_at).toLocaleString() : ''}</div>
+                </div>
+                {comment.user_id === userId && !isMobile && (
+                  <Button size="icon" variant="ghost" onClick={() => handleDeleteComment(comment.id)} title="Delete comment">
+                    🗑️
+                  </Button>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    );
+  };
   const renderInput = () => (
     <div className="flex items-center border-t border-border p-2 bg-card">
       <input
@@ -189,8 +213,8 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
   if (isMobile) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-[90vh] flex flex-col">
-          <div className="flex-1 flex flex-col">{renderComments()}</div>
+        <SheetContent side="bottom" className="flex flex-col rounded-t-2xl">
+          {renderComments()}
           {renderInput()}
         </SheetContent>
       </Sheet>
@@ -198,8 +222,8 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg w-full flex flex-col">
-        <div className="flex-1 flex flex-col">{renderComments()}</div>
+      <DialogContent className="max-w-lg w-full flex flex-col rounded-t-2xl">
+        {renderComments()}
         {renderInput()}
       </DialogContent>
     </Dialog>

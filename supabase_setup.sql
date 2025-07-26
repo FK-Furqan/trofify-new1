@@ -42,3 +42,61 @@ CREATE POLICY IF NOT EXISTS "Allow all operations on post" ON storage.objects
 
 CREATE POLICY IF NOT EXISTS "Allow all operations on story" ON storage.objects
   FOR ALL USING (bucket_id = 'story'); 
+
+-- Create the get_or_create_conversation function
+CREATE OR REPLACE FUNCTION get_or_create_conversation(user1_uuid UUID, user2_uuid UUID)
+RETURNS UUID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    conversation_id UUID;
+BEGIN
+    -- First, try to find an existing conversation between these two users
+    SELECT id INTO conversation_id
+    FROM conversations
+    WHERE (user1_id = user1_uuid AND user2_id = user2_uuid)
+       OR (user1_id = user2_uuid AND user2_id = user1_uuid)
+    LIMIT 1;
+    
+    -- If no conversation exists, create a new one
+    IF conversation_id IS NULL THEN
+        INSERT INTO conversations (user1_id, user2_id, created_at, updated_at)
+        VALUES (user1_uuid, user2_uuid, NOW(), NOW())
+        RETURNING id INTO conversation_id;
+    END IF;
+    
+    RETURN conversation_id;
+END;
+$$; 
+
+-- Create messages table
+CREATE TABLE IF NOT EXISTS messages (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_receiver_id ON messages(receiver_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+
+-- Create trigger to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_messages_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_messages_updated_at
+    BEFORE UPDATE ON messages
+    FOR EACH ROW
+    EXECUTE FUNCTION update_messages_updated_at(); 

@@ -3,6 +3,7 @@ import { Search, Grid, List, Filter, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PostCard } from "./PostCard";
+import { PostModal } from "./PostModal";
 import axios from "axios";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { getBackendUrl } from "@/lib/utils";
+import { UniversalLoader } from "@/components/ui/universal-loader";
 
 interface SearchViewProps {
   onProfileClick?: (profile: any) => void;
@@ -32,6 +34,8 @@ export const SearchView = ({ onProfileClick, userId, onSaveChange, onLoadingComp
   const [selectedFilter, setSelectedFilter] = useState("All");
   const [showFilters, setShowFilters] = useState(false);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<any>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Available filter categories
   const filterCategories = [
@@ -66,7 +70,7 @@ export const SearchView = ({ onProfileClick, userId, onSaveChange, onLoadingComp
     setLoading(true);
     setError("");
     try {
-      const res = await axios.get(`${getBackendUrl()}/api/posts`);
+      const res = await axios.get(`${getBackendUrl()}/api/posts?user_id=${userId}`);
       const data = res.data;
       
       // Map API data to PostCard structure with profile caching
@@ -125,12 +129,15 @@ export const SearchView = ({ onProfileClick, userId, onSaveChange, onLoadingComp
           id: post.id,
           author,
           content: post.description,
-          image: post.media_url || "",
-          likes: post.likes || 0,
-          comments: post.comments || 0,
-          shares: post.shares || 0,
+          image: (post.images && post.images.length > 0) ? post.images[0] : (post.media_url || ""),
+          images: post.images || [], // Add images array for carousel
+          likes: post.likes_count || 0,
+          comments: post.comments_count || 0,
+          shares: post.shares_count || 0,
           timeAgo: post.created_at ? formatTimeAgo(post.created_at) : "",
           category: author.sport,
+          isLiked: !!post.isLiked,
+          isSaved: !!post.isSaved,
         };
       }));
       
@@ -193,6 +200,16 @@ export const SearchView = ({ onProfileClick, userId, onSaveChange, onLoadingComp
     return `${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`;
   };
 
+  const handlePostClick = (post: any) => {
+    setSelectedPost(post);
+    setIsModalOpen(true);
+  };
+
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setSelectedPost(null);
+  };
+
 
 
 
@@ -208,23 +225,7 @@ export const SearchView = ({ onProfileClick, userId, onSaveChange, onLoadingComp
   }
 
   // Unified skeleton loader (same as Feed)
-  const renderSkeleton = () => (
-    <div className="space-y-4">
-      {[1, 2, 3].map((i) => (
-        <div key={i} className="bg-card rounded-lg p-4 animate-pulse">
-          <div className="flex items-center space-x-3 mb-3">
-            <div className="w-10 h-10 bg-muted rounded-full"></div>
-            <div className="flex-1">
-              <div className="h-4 bg-muted rounded w-24 mb-1"></div>
-              <div className="h-3 bg-muted rounded w-16"></div>
-            </div>
-          </div>
-          <div className="h-4 bg-muted rounded w-full mb-2"></div>
-          <div className="h-40 bg-muted rounded w-full"></div>
-        </div>
-      ))}
-    </div>
-  );
+  const renderSkeleton = () => <UniversalLoader />;
 
   return (
     <div className="w-full lg:px-4 lg:max-w-4xl lg:mx-auto px-0 mx-0">
@@ -312,10 +313,8 @@ export const SearchView = ({ onProfileClick, userId, onSaveChange, onLoadingComp
                   showTopMenu={false}
                   userId={userId}
                   onSaveChange={onSaveChange}
-                  isSaved={false}
-                  onPostClick={(post) => {
-                    console.log('Post clicked from search:', post);
-                  }}
+                  isSaved={post.isSaved}
+                  onPostClick={handlePostClick}
                 />
               ))}
             </div>
@@ -330,17 +329,26 @@ export const SearchView = ({ onProfileClick, userId, onSaveChange, onLoadingComp
                   showTopMenu={false}
                   userId={userId}
                   onSaveChange={onSaveChange}
-                  isSaved={false}
+                  isSaved={post.isSaved}
                   variant="grid"
-                  onPostClick={(post) => {
-                    console.log('Post clicked from search:', post);
-                  }}
+                  onPostClick={handlePostClick}
                 />
               ))}
             </div>
           )}
         </div>
       </div>
+      
+      {selectedPost && (
+        <PostModal
+          post={selectedPost}
+          isOpen={isModalOpen}
+          onClose={handleModalClose}
+          userId={userId}
+          onProfileClick={onProfileClick}
+          onSaveChange={onSaveChange}
+        />
+      )}
     </div>
   );
 }; 
