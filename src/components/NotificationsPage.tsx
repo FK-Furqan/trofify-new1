@@ -4,21 +4,26 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { NotificationService, Notification } from "@/lib/notificationService";
+import { RealtimeNotificationService } from "@/lib/realtimeNotificationService";
 import { toast } from "@/components/ui/use-toast";
+import { getBackendUrl } from "@/lib/utils";
 
 interface NotificationsPageProps {
   userId: string;
   onBack: () => void;
   onNotificationClick?: (notification: Notification) => void;
+  onProfileClick?: (profile: any) => void;
 }
 
-export const NotificationsPage = ({ userId, onBack, onNotificationClick }: NotificationsPageProps) => {
+export const NotificationsPage = ({ userId, onBack, onNotificationClick, onProfileClick }: NotificationsPageProps) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [offset, setOffset] = useState(0);
   const pollingInterval = useRef<NodeJS.Timeout | null>(null);
+  const unsubscribeNotification = useRef<(() => void) | null>(null);
+  const unsubscribeUnreadCount = useRef<(() => void) | null>(null);
   const limit = 20;
 
   const fetchNotifications = async (reset = false) => {
@@ -60,6 +65,10 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick }: Notif
     
     // Mark as read if not already read
     if (!notification.is_read) {
+      // Use real-time service for immediate feedback
+      RealtimeNotificationService.markAsRead(notification.id);
+      
+      // Also call the REST API as backup
       const success = await NotificationService.markAsRead(notification.id);
       if (success) {
         setNotifications(prev => 
@@ -71,7 +80,48 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick }: Notif
       }
     }
 
-    // Call the parent handler
+    // Handle support notifications - navigate to supporter's profile
+    if (notification.type === 'support' && notification.actor_id && onProfileClick) {
+      console.log('NotificationsPage: Support notification clicked, navigating to supporter profile:', notification.actor_id);
+      try {
+        // Fetch the supporter's complete profile data
+        const response = await fetch(`${getBackendUrl()}/api/users/${notification.actor_id}`);
+        if (response.ok) {
+          const supporterProfile = await response.json();
+          console.log('NotificationsPage: Navigating to supporter profile:', supporterProfile);
+          onProfileClick(supporterProfile);
+          return; // Don't call onNotificationClick for support notifications
+        } else {
+          console.error('Failed to fetch supporter profile, using fallback');
+          // Fallback to basic profile data if fetch fails
+          const fallbackProfile = {
+            id: notification.actor_id,
+            display_name: notification.message?.split(' has started supporting you')[0] || 'User',
+            email: `${notification.actor_id}@example.com`,
+            avatar: null,
+            user_type: 'athlete',
+            sport: 'athlete'
+          };
+          onProfileClick(fallbackProfile);
+          return; // Don't call onNotificationClick for support notifications
+        }
+      } catch (error) {
+        console.error('Error fetching supporter profile:', error);
+        // Fallback to basic profile data if fetch fails
+        const fallbackProfile = {
+          id: notification.actor_id,
+          display_name: notification.message?.split(' has started supporting you')[0] || 'User',
+          email: `${notification.actor_id}@example.com`,
+          avatar: null,
+          user_type: 'athlete',
+          sport: 'athlete'
+        };
+        onProfileClick(fallbackProfile);
+        return; // Don't call onNotificationClick for support notifications
+      }
+    }
+
+    // Call the parent handler for other notification types
     if (onNotificationClick) {
       console.log('NotificationsPage: Calling parent onNotificationClick');
       onNotificationClick(notification);
@@ -79,6 +129,10 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick }: Notif
   };
 
   const handleMarkAllAsRead = async () => {
+    // Use real-time service for immediate feedback
+    RealtimeNotificationService.markAllAsRead(userId);
+    
+    // Also call the REST API as backup
     const success = await NotificationService.markAllAsRead(userId);
     if (success) {
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
@@ -121,7 +175,7 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick }: Notif
   const getAvatarUrl = (avatar?: string) => {
     if (!avatar) return "/placeholder.svg";
     if (avatar.startsWith("http")) return avatar;
-    return `https://trofify-media.s3.amazonaws.com/${avatar}`;
+    return "/placeholder.svg";
   };
 
   const formatTimeAgo = (dateString: string) => {
@@ -138,28 +192,60 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick }: Notif
 
   const getNotificationIcon = (type: string) => {
     switch (type) {
-      case 'like':
-        return <Heart className="h-5 w-5 text-red-500" />;
-      case 'comment':
-        return <MessageCircle className="h-5 w-5 text-blue-500" />;
+          case 'like':
+      return <Heart className="h-5 w-5 text-[#0e9591]" />;
+          case 'comment':
+      return <MessageCircle className="h-5 w-5 text-[#0e9591]" />;
+      case 'support':
+        return <Heart className="h-5 w-5 text-[#0e9591]" />;
       default:
         return <Bell className="h-5 w-5" />;
     }
   };
 
-  // Set up polling for real-time updates
+  // Set up real-time notifications and polling as fallback
   useEffect(() => {
     if (userId) {
+      // Initialize real-time notification service
+      RealtimeNotificationService.initialize(userId);
+      
+      // Subscribe to new notifications
+      unsubscribeNotification.current = RealtimeNotificationService.subscribeToNotifications((newNotification) => {
+        setNotifications(prev => [newNotification, ...prev]);
+        setUnreadCount(prev => prev + 1);
+        
+        // Show toast for new notification
+        toast({
+          title: "New Notification",
+          description: newNotification.message,
+        });
+      });
+
+      // Subscribe to unread count updates
+      unsubscribeUnreadCount.current = RealtimeNotificationService.subscribeToUnreadCount((count) => {
+        setUnreadCount(count);
+      });
+
+      // Initial fetch
       fetchNotifications(true);
       
-      // Poll every 30 seconds for new notifications
+      // Request initial unread count
+      RealtimeNotificationService.requestUnreadCount(userId);
+      
+      // Poll every 60 seconds as fallback (reduced frequency since we have real-time)
       pollingInterval.current = setInterval(() => {
         fetchNotifications(true);
-      }, 30000);
+      }, 60000);
 
       return () => {
         if (pollingInterval.current) {
           clearInterval(pollingInterval.current);
+        }
+        if (unsubscribeNotification.current) {
+          unsubscribeNotification.current();
+        }
+        if (unsubscribeUnreadCount.current) {
+          unsubscribeUnreadCount.current();
         }
       };
     }
@@ -227,7 +313,7 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick }: Notif
                 key={notification.id}
                 className={`p-4 rounded-lg border cursor-pointer transition-colors hover:bg-muted/50 ${
                   !notification.is_read ? 'bg-muted/30 border-primary/20' : 'bg-card'
-                }`}
+                } ${notification.type === 'support' ? 'border-l-4 border-l-[#0e9591]' : ''}`}
                 onClick={() => handleNotificationClick(notification)}
               >
                 <div className="flex items-start space-x-3">
@@ -245,7 +331,7 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick }: Notif
                         {notification.actor?.display_name || notification.actor?.email}
                       </span>
                       {notification.actor?.user_type && (
-                        <Badge variant="secondary" className="text-xs">
+                        <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
                           {notification.actor.user_type}
                         </Badge>
                       )}
@@ -255,6 +341,9 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick }: Notif
                     </div>
                     <p className="text-sm text-muted-foreground mb-1">
                       {notification.message}
+                      {notification.type === 'support' && (
+                        <span className="text-[#0e9591] text-xs ml-2">Click to view profile →</span>
+                      )}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {formatTimeAgo(notification.created_at)}

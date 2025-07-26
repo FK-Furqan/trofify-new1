@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -7,6 +7,8 @@ import { Conversation } from "@/lib/messagingService";
 import { messagingService } from "@/lib/messagingService";
 import { UniversalLoader } from "@/components/ui/universal-loader";
 import { Badge } from "@/components/ui/badge";
+import { getSocket } from "@/lib/socket";
+import { MessageTicks } from "./MessageTicks";
 
 interface ConversationsListProps {
   currentUserId?: string;
@@ -24,9 +26,10 @@ export const ConversationsList = ({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [userStatuses, setUserStatuses] = useState<Record<string, 'online' | 'offline'>>({});
 
   // Load conversations
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
     if (!currentUserId) return;
     
     setLoading(true);
@@ -38,40 +41,139 @@ export const ConversationsList = ({
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    loadConversations();
   }, [currentUserId]);
 
-  // Refresh conversations when callback is triggered
+  // Set up real-time updates
   useEffect(() => {
-    if (onRefresh) {
+    if (!currentUserId) return;
+
+    const socket = getSocket();
+    
+    // Listen for new messages to update conversation list
+    const handleNewMessage = (data: any) => {
+      // Update conversations list when a new message is received
+      setConversations(prev => {
+        const updatedConversations = [...prev];
+        const conversationIndex = updatedConversations.findIndex(c => c.id === data.conversation_id);
+        
+        if (conversationIndex !== -1) {
+          // Update the conversation with new message info
+          updatedConversations[conversationIndex] = {
+            ...updatedConversations[conversationIndex],
+            last_message: data.message.content,
+            last_message_at: data.message.created_at,
+            last_message_delivery_status: data.message.delivery_status,
+            last_message_sender_id: data.message.sender_id,
+            unread_count: data.message.sender_id !== currentUserId 
+              ? (updatedConversations[conversationIndex].unread_count || 0) + 1
+              : updatedConversations[conversationIndex].unread_count
+          };
+          
+          // Move this conversation to the top
+          const conversation = updatedConversations.splice(conversationIndex, 1)[0];
+          updatedConversations.unshift(conversation);
+        }
+        
+        return updatedConversations;
+      });
+    };
+
+    // Listen for delivery status updates
+    const handleMessageDelivered = (data: any) => {
+      setConversations(prev => {
+        const updatedConversations = [...prev];
+        const conversationIndex = updatedConversations.findIndex(c => c.id === data.conversation_id);
+        
+        if (conversationIndex !== -1) {
+          updatedConversations[conversationIndex] = {
+            ...updatedConversations[conversationIndex],
+            last_message_delivery_status: 'delivered'
+          };
+        }
+        
+        return updatedConversations;
+      });
+    };
+
+    const handleMessageRead = (data: any) => {
+      setConversations(prev => {
+        const updatedConversations = [...prev];
+        const conversationIndex = updatedConversations.findIndex(c => c.id === data.conversation_id);
+        
+        if (conversationIndex !== -1) {
+          updatedConversations[conversationIndex] = {
+            ...updatedConversations[conversationIndex],
+            last_message_delivery_status: 'read'
+          };
+        }
+        
+        return updatedConversations;
+      });
+    };
+
+    // Listen for user status updates
+    const handleUserStatus = (data: any) => {
+      setUserStatuses(prev => ({
+        ...prev,
+        [data.userId]: data.status
+      }));
+    };
+
+    // Get initial status for all users in conversations
+    const getInitialStatuses = async () => {
+      const socket = getSocket();
+      conversations.forEach(conv => {
+        socket.emit('get_user_status', { userId: conv.other_user.id });
+      });
+    };
+
+    // Listen for new messages
+    socket.on('new_message', handleNewMessage);
+    socket.on('message_delivered', handleMessageDelivered);
+    socket.on('message_read', handleMessageRead);
+    
+    // Listen for user status updates
+    socket.on('user_status', handleUserStatus);
+    
+    // Get initial statuses
+    getInitialStatuses();
+
+    return () => {
+      socket.off('new_message', handleNewMessage);
+      socket.off('message_delivered', handleMessageDelivered);
+      socket.off('message_read', handleMessageRead);
+      socket.off('user_status', handleUserStatus);
+    };
+  }, [currentUserId, conversations]);
+
+  // Main effect to load conversations
+  useEffect(() => {
+    if (currentUserId) {
       loadConversations();
     }
-  }, [onRefresh]);
+  }, [currentUserId, loadConversations]);
 
-  // Force refresh on component mount to clear any cached data
+  // Auto-refresh conversations every 30 seconds if there are unread messages
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadConversations();
-    }, 1000);
+    if (!currentUserId) return;
     
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Auto-refresh conversations every 10 seconds if there are unread messages
-  useEffect(() => {
     const hasUnreadMessages = conversations.some(conv => conv.unread_count && conv.unread_count > 0);
     
     if (hasUnreadMessages) {
       const interval = setInterval(() => {
         loadConversations();
-      }, 10000); // Refresh every 10 seconds if there are unread messages
+      }, 30000); // Refresh every 30 seconds if there are unread messages
       
       return () => clearInterval(interval);
     }
-  }, [conversations]);
+  }, [currentUserId, conversations.length, loadConversations]); // Only depend on currentUserId and conversations length, not the full conversations array
+
+  // Handle external refresh requests
+  useEffect(() => {
+    if (onRefresh && currentUserId) {
+      loadConversations();
+    }
+  }, [onRefresh, currentUserId, loadConversations]);
 
   // Filter conversations based on search
   const filteredConversations = conversations.filter(conv =>
@@ -126,7 +228,7 @@ export const ConversationsList = ({
       </div>
 
       {/* Conversations List */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0 scrollbar-hide">
         {loading ? (
           <UniversalLoader count={3} type="conversation" />
         ) : filteredConversations.length === 0 ? (
@@ -160,6 +262,10 @@ export const ConversationsList = ({
                         : 'U'}
                     </AvatarFallback>
                   </Avatar>
+                  {/* Online/Offline status indicator */}
+                  <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white ${
+                    userStatuses[conversation.other_user.id] === 'online' ? 'bg-green-500' : 'bg-gray-400'
+                  }`} />
                   {conversation.unread_count && conversation.unread_count > 0 && (
                     <Badge 
                       className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs bg-[#0e9591] text-white font-bold"
@@ -171,13 +277,20 @@ export const ConversationsList = ({
                 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <h3 className={`font-medium truncate ${
-                      conversation.unread_count && conversation.unread_count > 0 
-                        ? 'text-foreground font-semibold' 
-                        : 'text-foreground'
-                    }`}>
-                      {conversation.other_user.display_name}
-                    </h3>
+                    <div className="flex items-center space-x-2">
+                      <h3 className={`font-medium truncate ${
+                        conversation.unread_count && conversation.unread_count > 0 
+                          ? 'text-foreground font-semibold' 
+                          : 'text-foreground'
+                      }`}>
+                        {conversation.other_user.display_name}
+                      </h3>
+                      <span className={`text-xs ${
+                        userStatuses[conversation.other_user.id] === 'online' ? 'text-green-500' : 'text-gray-500'
+                      }`}>
+                        {userStatuses[conversation.other_user.id] === 'online' ? 'Online' : 'Offline'}
+                      </span>
+                    </div>
                     <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
                       {formatTime(conversation.last_message_at)}
                     </span>
@@ -191,9 +304,18 @@ export const ConversationsList = ({
                     }`}>
                       {getConversationPreview(conversation)}
                     </p>
-                    <Badge variant="secondary" className="text-xs ml-2 flex-shrink-0">
-                      {conversation.other_user.user_type}
-                    </Badge>
+                    <div className="flex items-center space-x-2 ml-2 flex-shrink-0">
+                      {/* Show delivery status ticks for the last message if it's from the current user */}
+                      {conversation.last_message_sender_id === currentUserId && conversation.last_message_delivery_status && (
+                        <MessageTicks 
+                          deliveryStatus={conversation.last_message_delivery_status} 
+                          isOwnMessage={true} 
+                        />
+                      )}
+                      <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
+                        {conversation.other_user.user_type}
+                      </Badge>
+                    </div>
                   </div>
                   
                   {/* Unread indicator dot - only show if there are unread messages */}

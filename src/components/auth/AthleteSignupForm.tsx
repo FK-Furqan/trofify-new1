@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { getBackendUrl } from "@/lib/utils";
 
 interface AthleteSignupFormProps {
   onSuccess: (email: string) => void;
@@ -55,7 +56,7 @@ export const AthleteSignupForm = ({ onSuccess, onBack }: AthleteSignupFormProps)
     setLoading(true);
     setSuccess(false);
     try {
-      const response = await fetch("http://localhost:5000/signup", {
+      const response = await fetch(`${getBackendUrl()}/signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

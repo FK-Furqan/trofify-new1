@@ -4,6 +4,7 @@ import { ConversationView } from "./ConversationView";
 import { NewMessageView } from "./NewMessageView";
 import { Conversation } from "@/lib/messagingService";
 import { messagingService } from "@/lib/messagingService";
+import { getBackendUrl } from "@/lib/utils";
 
 interface MessagesViewProps {
   onProfileClick?: (profile: any) => void;
@@ -82,7 +83,7 @@ export const MessagesView = ({ onProfileClick, currentUserId, targetUserId, onCl
       // Try to fetch the target user's information
       let targetUser = null;
       try {
-        const userResponse = await fetch(`http://localhost:5000/api/users/${targetUserId}`);
+        const userResponse = await fetch(`${getBackendUrl()}/api/users/${targetUserId}`);
         
         if (userResponse.ok) {
           targetUser = await userResponse.json();

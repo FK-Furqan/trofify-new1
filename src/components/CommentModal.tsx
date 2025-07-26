@@ -105,7 +105,7 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
     if (!avatar) return "/placeholder.svg";
     if (avatar.startsWith("http")) return avatar;
     if (avatar.startsWith("/")) return avatar;
-    return `https://trofify-media.s3.amazonaws.com/${avatar}`;
+    return "/placeholder.svg";
   };
 
   // Handles navigation to user profile when avatar or name is clicked
@@ -125,7 +125,7 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
       <div
         ref={commentsContainerRef}
         className={
-          `px-4 py-2 transition-all duration-200 ` +
+          `px-4 py-2 transition-all duration-200 bg-background ` +
           (isScrollable
             ? 'max-h-[50vh] overflow-y-auto scroll-smooth scrollbar-hide'
             : 'max-h-none overflow-visible')
@@ -133,8 +133,39 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
         style={{ minHeight: 0 }}
       >
         {loading ? (
-          <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
-            <UniversalLoader count={2} />
+          <div className="space-y-4">
+            {/* Comment skeleton 1 */}
+            <div className="flex items-start space-x-3">
+              <div className="h-8 w-8 rounded-full bg-muted animate-pulse"></div>
+              <div className="flex-1">
+                <div className="h-4 bg-muted-foreground/20 rounded w-24 mb-2"></div>
+                <div className="h-4 bg-muted-foreground/20 rounded mb-1"></div>
+                <div className="h-4 bg-muted-foreground/20 rounded mb-1 w-3/4"></div>
+                <div className="h-3 bg-muted-foreground/20 rounded w-32"></div>
+              </div>
+            </div>
+            
+            {/* Comment skeleton 2 */}
+            <div className="flex items-start space-x-3">
+              <div className="h-8 w-8 rounded-full bg-muted animate-pulse"></div>
+              <div className="flex-1">
+                <div className="h-4 bg-muted-foreground/20 rounded w-20 mb-2"></div>
+                <div className="h-4 bg-muted-foreground/20 rounded mb-1 w-2/3"></div>
+                <div className="h-3 bg-muted-foreground/20 rounded w-28"></div>
+              </div>
+            </div>
+            
+            {/* Comment skeleton 3 */}
+            <div className="flex items-start space-x-3">
+              <div className="h-8 w-8 rounded-full bg-muted animate-pulse"></div>
+              <div className="flex-1">
+                <div className="h-4 bg-muted-foreground/20 rounded w-28 mb-2"></div>
+                <div className="h-4 bg-muted-foreground/20 rounded mb-1"></div>
+                <div className="h-4 bg-muted-foreground/20 rounded mb-1"></div>
+                <div className="h-4 bg-muted-foreground/20 rounded mb-1 w-4/5"></div>
+                <div className="h-3 bg-muted-foreground/20 rounded w-36"></div>
+              </div>
+            </div>
           </div>
         ) : comments.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
@@ -198,13 +229,13 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
     );
   };
   const renderInput = () => (
-    <div className="flex items-center border-t border-border p-2 bg-card">
+    <div className="flex items-center border-t border-border p-2 bg-background">
       <input
         type="text"
         value={commentText}
         onChange={e => setCommentText(e.target.value)}
         placeholder="Write a comment..."
-        className="flex-1 border border-input bg-background text-foreground rounded px-3 py-2 mr-2 placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#0e9591] focus:border-transparent"
+        className="flex-1 border border-border bg-card text-foreground rounded px-3 py-2 mr-2 placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#0e9591] focus:border-transparent"
         onKeyDown={e => e.key === "Enter" && handleAddComment()}
       />
       <Button onClick={handleAddComment} disabled={!commentText.trim()} className="bg-[#0e9591] text-white hover:bg-[#087a74]">Post</Button>
@@ -213,7 +244,7 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
   if (isMobile) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="flex flex-col rounded-t-2xl">
+        <SheetContent side="bottom" className="flex flex-col rounded-t-2xl bg-background">
           {renderComments()}
           {renderInput()}
         </SheetContent>
@@ -222,7 +253,7 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg w-full flex flex-col rounded-t-2xl">
+      <DialogContent className="max-w-lg w-full flex flex-col rounded-t-2xl bg-background">
         {renderComments()}
         {renderInput()}
       </DialogContent>

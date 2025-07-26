@@ -5,8 +5,24 @@ require('dotenv').config();
 const supabase = require('./db');
 const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
+const server = createServer(app);
+
+// Configure Socket.IO
+const io = new Server(server, {
+  cors: {
+    origin: [
+      'https://www.trofify.com',
+      'https://trofify.com',
+      'http://localhost:8080',
+      'http://localhost:8081'
+    ],
+    credentials: true
+  }
+});
 
 // Configure multer for memory storage (we'll upload to Supabase)
 const upload = multer({ storage: multer.memoryStorage() });
@@ -22,6 +38,317 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Track online users globally (outside connection handler)
+const onlineUsers = new Map();
+
+// Socket.IO event handlers
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
+
+  // Store user's online status
+  let currentUserId = null;
+
+  // Handle user registration/connection
+  socket.on('register', (data) => {
+    const userId = typeof data === 'string' ? data : data?.userId;
+    if (userId) {
+      currentUserId = userId;
+      socket.userId = userId; // Store userId on socket for status checks
+      
+      // Add user to online users map
+      onlineUsers.set(userId, socket.id);
+      
+      // Update user's online status
+      socket.broadcast.emit('user_status', {
+        userId: userId,
+        status: 'online'
+      });
+      
+      // When user connects, mark all pending messages as delivered
+      markPendingMessagesAsDelivered(userId);
+      
+      console.log(`User ${userId} registered and connected. Online users:`, Array.from(onlineUsers.keys()));
+    }
+  });
+
+  // Join notification room for a user
+  socket.on('join_notifications', (data) => {
+    const { userId } = data;
+    if (userId) {
+      socket.join(`notifications_${userId}`);
+      console.log(`User ${userId} joined notifications room`);
+    }
+  });
+
+  // Join conversation room for real-time messaging
+  socket.on('join_conversation', (data) => {
+    const { conversationId, userId } = data;
+    if (conversationId && userId) {
+      socket.join(`conversation_${conversationId}`);
+      currentUserId = userId;
+      
+      // Update user's online status
+      socket.broadcast.emit('user_status', {
+        userId: userId,
+        status: 'online'
+      });
+      
+      // When user comes online, mark all pending messages as delivered
+      markPendingMessagesAsDelivered(userId);
+      
+      console.log(`User ${userId} joined conversation ${conversationId}`);
+    }
+  });
+
+  // Function to mark pending messages as delivered when user comes online
+  const markPendingMessagesAsDelivered = async (userId) => {
+    try {
+      // Get all conversations where this user is the receiver
+      const { data: conversations, error: convError } = await supabase
+        .from('conversations')
+        .select('id')
+        .or(`user1_id.eq.${userId},user2_id.eq.${userId}`);
+
+      if (convError) {
+        console.error('Error fetching conversations for delivery:', convError);
+        return;
+      }
+
+      if (conversations && conversations.length > 0) {
+        const conversationIds = conversations.map(c => c.id);
+        
+        // Find all sent messages that need to be marked as delivered
+        const { data: pendingMessages, error: msgError } = await supabase
+          .from('messages')
+          .select('id, conversation_id, sender_id')
+          .in('conversation_id', conversationIds)
+          .eq('receiver_id', userId)
+          .eq('delivery_status', 'sent');
+
+        if (msgError) {
+          console.error('Error fetching pending messages:', msgError);
+          return;
+        }
+
+        // Mark each pending message as delivered
+        for (const message of pendingMessages || []) {
+          const { error: updateError } = await supabase
+            .from('messages')
+            .update({ delivery_status: 'delivered' })
+            .eq('id', message.id);
+
+          if (!updateError) {
+            // Emit delivery status update to the conversation
+            io.to(`conversation_${message.conversation_id}`).emit('message_delivered', {
+              message_id: message.id,
+              conversation_id: message.conversation_id
+            });
+            
+            console.log(`Message ${message.id} marked as delivered for user ${userId}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error marking pending messages as delivered:', error);
+    }
+  };
+
+  // Leave conversation room
+  socket.on('leave_conversation', (data) => {
+    const { conversationId, userId } = data;
+    if (conversationId && userId) {
+      socket.leave(`conversation_${conversationId}`);
+      console.log(`User ${userId} left conversation ${conversationId}`);
+    }
+  });
+
+  // Handle typing status
+  socket.on('typing_status', (data) => {
+    const { conversationId, userId, isTyping } = data;
+    if (conversationId && userId) {
+      // Broadcast typing status to all users in the conversation except the sender
+      socket.to(`conversation_${conversationId}`).emit('typing_status', {
+        conversationId: conversationId,
+        userId: userId,
+        isTyping: isTyping
+      });
+      
+      console.log(`User ${userId} ${isTyping ? 'started' : 'stopped'} typing in conversation ${conversationId}`);
+    }
+  });
+
+  // Handle message delivered status
+  socket.on('message_delivered', async (data) => {
+    const { messageId, receiverId } = data;
+    if (messageId && receiverId) {
+      try {
+        const { data: message, error } = await supabase
+          .from('messages')
+          .update({ delivery_status: 'delivered' })
+          .eq('id', messageId)
+          .eq('receiver_id', receiverId)
+          .select('conversation_id')
+          .single();
+
+        if (!error && message) {
+          // Broadcast delivery status to all users in the conversation
+          io.to(`conversation_${message.conversation_id}`).emit('message_delivered', {
+            message_id: messageId,
+            conversation_id: message.conversation_id
+          });
+          
+          console.log(`Message ${messageId} marked as delivered`);
+        }
+      } catch (error) {
+        console.error('Error marking message as delivered:', error);
+      }
+    }
+  });
+
+  // Handle message read status
+  socket.on('message_read', async (data) => {
+    const { messageId, receiverId } = data;
+    if (messageId && receiverId) {
+      try {
+        const { data: message, error } = await supabase
+          .from('messages')
+          .update({ 
+            is_read: true,
+            delivery_status: 'read'
+          })
+          .eq('id', messageId)
+          .eq('receiver_id', receiverId)
+          .select('conversation_id')
+          .single();
+
+        if (!error && message) {
+          // Broadcast read status to all users in the conversation
+          io.to(`conversation_${message.conversation_id}`).emit('message_read', {
+            message_id: messageId,
+            conversation_id: message.conversation_id
+          });
+          
+          console.log(`Message ${messageId} marked as read`);
+        }
+      } catch (error) {
+        console.error('Error marking message as read:', error);
+      }
+    }
+  });
+
+  // Get user status
+  socket.on('get_user_status', (data) => {
+    const { userId } = data;
+    if (userId) {
+      // Check if user is online using the online users map
+      const isOnline = onlineUsers.has(userId);
+      
+      socket.emit('user_status', {
+        userId: userId,
+        status: isOnline ? 'online' : 'offline'
+      });
+      
+      console.log(`User ${userId} status check: ${isOnline ? 'online' : 'offline'}`);
+    }
+  });
+
+  // Handle unread count request
+  socket.on('get_unread_count', async (data) => {
+    const { userId } = data;
+    if (userId) {
+      try {
+        const { count } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .eq('is_read', false);
+        
+        socket.emit('unread_count_update', { userId, count: count || 0 });
+      } catch (error) {
+        console.error('Error getting unread count:', error);
+        socket.emit('unread_count_update', { userId, count: 0 });
+      }
+    }
+  });
+
+  // Handle mark notification as read
+  socket.on('mark_notification_read', async (data) => {
+    const { notificationId } = data;
+    if (notificationId) {
+      try {
+        const { error } = await supabase
+          .from('notifications')
+          .update({ is_read: true })
+          .eq('id', notificationId);
+        
+        if (!error) {
+          // Get the notification to find the user_id
+          const { data: notification } = await supabase
+            .from('notifications')
+            .select('user_id')
+            .eq('id', notificationId)
+            .single();
+          
+          if (notification) {
+            // Update unread count for the user
+            const { count } = await supabase
+              .from('notifications')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', notification.user_id)
+              .eq('is_read', false);
+            
+            io.to(`notifications_${notification.user_id}`).emit('unread_count_update', {
+              userId: notification.user_id,
+              count: count || 0
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error marking notification as read:', error);
+      }
+    }
+  });
+
+  // Handle mark all notifications as read
+  socket.on('mark_all_notifications_read', async (data) => {
+    const { userId } = data;
+    if (userId) {
+      try {
+        const { error } = await supabase
+          .from('notifications')
+          .update({ is_read: true })
+          .eq('user_id', userId);
+        
+        if (!error) {
+          io.to(`notifications_${userId}`).emit('unread_count_update', {
+            userId,
+            count: 0
+          });
+        }
+      } catch (error) {
+        console.error('Error marking all notifications as read:', error);
+      }
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+    
+    // Update user's offline status
+    if (currentUserId) {
+      // Remove user from online users map
+      onlineUsers.delete(currentUserId);
+      
+      socket.broadcast.emit('user_status', {
+        userId: currentUserId,
+        status: 'offline'
+      });
+      
+      console.log(`User ${currentUserId} went offline. Online users:`, Array.from(onlineUsers.keys()));
+    }
+  });
+});
+
 app.use('/signup', signupRoute);
 
 // Debug endpoint to check all users
@@ -30,6 +357,19 @@ app.get('/api/debug/users', async (req, res) => {
     const { data, error } = await supabase.from('users').select('id, email, user_type');
     if (error) throw error;
     res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint to check online users
+app.get('/api/debug/online-users', (req, res) => {
+  try {
+    const onlineUserIds = Array.from(onlineUsers.keys());
+    res.json({ 
+      onlineUsers: onlineUserIds,
+      count: onlineUserIds.length
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -83,12 +423,25 @@ app.post('/api/upload-profile-image', upload.single('file'), async (req, res) =>
       return res.status(400).json({ error: 'File and userId required' });
     }
 
+    // First, get the current user to check if they have an existing avatar
+    const { data: currentUser, error: userError } = await supabase
+      .from('users')
+      .select('avatar')
+      .eq('id', userId)
+      .single();
+
+    if (userError) {
+      console.error('Error fetching current user:', userError);
+    }
+
     const fileName = `${userId}/${Date.now()}-${req.file.originalname}`;
+    
     // Upload to Supabase Storage
     const { data, error } = await supabase.storage
       .from('profile-photo')
       .upload(fileName, req.file.buffer, {
-        contentType: req.file.mimetype
+        contentType: req.file.mimetype,
+        upsert: true
       });
 
     if (error) throw error;
@@ -105,6 +458,42 @@ app.post('/api/upload-profile-image', upload.single('file'), async (req, res) =>
       .eq('id', userId);
 
     if (updateError) throw updateError;
+
+    // If user had a previous avatar, try to delete it from storage
+    if (currentUser && currentUser.avatar) {
+      try {
+        // Extract the file path from the old avatar URL
+        const oldAvatarUrl = currentUser.avatar;
+        if (oldAvatarUrl.includes('profile-photo')) {
+          // Extract the file path from the URL
+          const urlParts = oldAvatarUrl.split('/');
+          const filePath = urlParts.slice(urlParts.indexOf('profile-photo') + 1).join('/');
+          
+          // Delete the old file
+          await supabase.storage
+            .from('profile-photo')
+            .remove([filePath]);
+          
+          console.log('Old profile image deleted:', filePath);
+        }
+      } catch (deleteError) {
+        console.error('Error deleting old profile image:', deleteError);
+        // Don't fail the upload if deletion fails
+      }
+    }
+
+    // Also update user_media table to track the new profile image
+    try {
+      await supabase.from('user_media').insert({
+        user_id: userId,
+        media_url: publicUrl,
+        media_type: 'profile_image',
+        is_active: true
+      });
+    } catch (mediaError) {
+      console.error('Error updating user_media table:', mediaError);
+      // Don't fail the upload if media tracking fails
+    }
 
     res.json({ imageUrl: publicUrl, message: 'Profile image uploaded and user updated successfully' });
   } catch (error) {
@@ -459,18 +848,37 @@ app.post('/api/posts/:post_id/like', async (req, res) => {
     // Create notification
     const notificationMessage = `${actorData.display_name || actorData.email} liked your post`;
     
-    const { error: notificationError } = await supabase.from('notifications').insert({
+    const { data: notificationData, error: notificationError } = await supabase.from('notifications').insert({
       user_id: postData.user_id, // Post owner
       actor_id: user_id, // User who liked
       post_id: parseInt(post_id),
       type: 'like',
       message: notificationMessage,
       is_read: false
-    });
+    }).select().single();
 
     if (notificationError) {
       console.error('Failed to create notification:', notificationError);
       // Don't fail the like operation if notification fails
+    } else {
+      // Emit real-time notification
+      const notificationWithActor = {
+        ...notificationData,
+        actor: actorData
+      };
+      io.to(`notifications_${postData.user_id}`).emit('new_notification', notificationWithActor);
+      
+      // Update unread count
+      const { count } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', postData.user_id)
+        .eq('is_read', false);
+      
+      io.to(`notifications_${postData.user_id}`).emit('unread_count_update', {
+        userId: postData.user_id,
+        count: count || 0
+      });
     }
 
     res.json({ message: 'Post liked successfully' });
@@ -536,18 +944,37 @@ app.post('/api/posts/:post_id/comments', async (req, res) => {
       // Create notification
       const notificationMessage = `${actorData.display_name || actorData.email} commented: "${comment.substring(0, 50)}${comment.length > 50 ? '...' : ''}"`;
       
-      const { error: notificationError } = await supabase.from('notifications').insert({
+      const { data: notificationData, error: notificationError } = await supabase.from('notifications').insert({
         user_id: postData.user_id, // Post owner
         actor_id: user_id, // User who commented
         post_id: parseInt(post_id),
         type: 'comment',
         message: notificationMessage,
         is_read: false
-      });
+      }).select().single();
 
       if (notificationError) {
         console.error('Failed to create notification:', notificationError);
         // Don't fail the comment operation if notification fails
+      } else {
+        // Emit real-time notification
+        const notificationWithActor = {
+          ...notificationData,
+          actor: actorData
+        };
+        io.to(`notifications_${postData.user_id}`).emit('new_notification', notificationWithActor);
+        
+        // Update unread count
+        const { count } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', postData.user_id)
+          .eq('is_read', false);
+        
+        io.to(`notifications_${postData.user_id}`).emit('unread_count_update', {
+          userId: postData.user_id,
+          count: count || 0
+        });
       }
     }
 
@@ -712,6 +1139,7 @@ app.post('/api/stories', async (req, res) => {
 // Get all stories with user info (last 24 hours)
 app.get('/api/stories', async (req, res) => {
   try {
+    const { viewer_id } = req.query; // Optional: current user's ID to check viewed status
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     
     // First get stories
@@ -722,6 +1150,19 @@ app.get('/api/stories', async (req, res) => {
       .order('created_at', { ascending: false });
 
     if (storiesError) throw storiesError;
+
+    // Get viewed stories for the current user if viewer_id is provided
+    let viewedStoryIds = [];
+    if (viewer_id) {
+      const { data: viewedStories, error: viewedError } = await supabase
+        .from('story_views')
+        .select('story_id')
+        .eq('viewer_id', viewer_id);
+      
+      if (!viewedError && viewedStories) {
+        viewedStoryIds = viewedStories.map(view => view.story_id);
+      }
+    }
 
     // Then get user info for each story
     const storiesWithUsers = await Promise.all(
@@ -734,7 +1175,8 @@ app.get('/api/stories', async (req, res) => {
 
         return {
           ...story,
-          users: user || { display_name: 'Unknown User', email: 'unknown@example.com' }
+          users: user || { display_name: 'Unknown User', email: 'unknown@example.com' },
+          viewed: viewedStoryIds.includes(story.id)
         };
       })
     );
@@ -895,6 +1337,61 @@ app.delete('/api/stories/:story_id/likes', async (req, res) => {
   }
 });
 
+// === STORY VIEWS ENDPOINTS ===
+
+// Mark a story as viewed by a user
+app.post('/api/stories/:story_id/view', async (req, res) => {
+  try {
+    const { story_id } = req.params;
+    const { viewer_id } = req.body;
+    
+    if (!viewer_id) {
+      return res.status(400).json({ error: 'viewer_id required' });
+    }
+
+    // Insert view record (UNIQUE constraint will prevent duplicates)
+    const { data, error } = await supabase
+      .from('story_views')
+      .insert({
+        story_id: parseInt(story_id),
+        viewer_id: viewer_id
+      });
+
+    if (error) {
+      // If it's a duplicate key error, that's fine - story was already viewed
+      if (error.code === '23505') { // PostgreSQL unique constraint violation
+        return res.json({ message: 'Story already viewed' });
+      }
+      throw error;
+    }
+    
+    res.json({ message: 'Story marked as viewed' });
+  } catch (error) {
+    console.error('Error marking story as viewed:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get viewed stories for a user
+app.get('/api/stories/viewed/:viewer_id', async (req, res) => {
+  try {
+    const { viewer_id } = req.params;
+    
+    const { data: viewedStories, error } = await supabase
+      .from('story_views')
+      .select('story_id')
+      .eq('viewer_id', viewer_id);
+
+    if (error) throw error;
+    
+    const viewedStoryIds = viewedStories.map(view => view.story_id);
+    res.json({ viewedStoryIds });
+  } catch (error) {
+    console.error('Error getting viewed stories:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // === USER PROFILE ENDPOINTS ===
 
 // Get user by ID with complete profile data
@@ -905,7 +1402,7 @@ app.get('/api/users/:user_id', async (req, res) => {
     // Get user base info
     const { data: user, error: userError } = await supabase
       .from('users')
-      .select('id, email, user_type, display_name, phone_number, avatar, created_at, updated_at')
+      .select('id, email, user_type, display_name, phone_number, avatar, created_at')
       .eq('id', user_id)
       .single();
     
@@ -1361,7 +1858,7 @@ app.get('/api/users/:user_id/conversations', async (req, res) => {
       // Get the last message content
       const { data: lastMessage } = await supabase
         .from('messages')
-        .select('content')
+        .select('content, delivery_status, sender_id')
         .eq('conversation_id', conv.id)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -1374,7 +1871,9 @@ app.get('/api/users/:user_id/conversations', async (req, res) => {
         updated_at: conv.updated_at,
         last_message_at: conv.last_message_at,
         unread_count: unreadCount > 0 ? unreadCount : null,
-        last_message: lastMessage?.content || null
+        last_message: lastMessage?.content || null,
+        last_message_delivery_status: lastMessage?.delivery_status || null,
+        last_message_sender_id: lastMessage?.sender_id || null
       };
     }));
 
@@ -1446,7 +1945,8 @@ app.post('/api/conversations/:conversation_id/messages', async (req, res) => {
         conversation_id,
         sender_id,
         receiver_id,
-        content: content.trim()
+        content: content.trim(),
+        delivery_status: 'sent'
       })
       .select(`
         *,
@@ -1459,9 +1959,81 @@ app.post('/api/conversations/:conversation_id/messages', async (req, res) => {
 
     if (error) throw error;
 
-    res.json(message);
+    // Check if recipient is online and mark message as delivered immediately
+    let finalMessage = message;
+    if (onlineUsers.has(receiver_id)) {
+      // Recipient is online, mark message as delivered
+      const { data: updatedMessage, error: updateError } = await supabase
+        .from('messages')
+        .update({ delivery_status: 'delivered' })
+        .eq('id', message.id)
+        .select(`
+          *,
+          sender:users!messages_sender_id_fkey(id, display_name, email, avatar, user_type),
+          receiver:users!messages_receiver_id_fkey(id, display_name, email, avatar, user_type)
+        `)
+        .single();
+
+      if (!updateError && updatedMessage) {
+        finalMessage = updatedMessage;
+        console.log(`Message ${message.id} marked as delivered immediately (recipient online)`);
+      }
+    }
+
+    // Update conversation's last_message_at
+    await supabase
+      .from('conversations')
+      .update({ 
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', conversation_id);
+
+    // Emit real-time update to all users in the conversation
+    io.to(`conversation_${conversation_id}`).emit('new_message', {
+      conversation_id: conversation_id,
+      message: finalMessage
+    });
+
+    // If message was marked as delivered, also emit delivery status update
+    if (finalMessage.delivery_status === 'delivered') {
+      io.to(`conversation_${conversation_id}`).emit('message_delivered', {
+        message_id: finalMessage.id,
+        conversation_id: conversation_id
+      });
+    }
+
+    res.json(finalMessage);
   } catch (error) {
     console.error('Error sending message:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Mark message as delivered
+app.put('/api/messages/:message_id/delivered', async (req, res) => {
+  try {
+    const { message_id } = req.params;
+    const { receiver_id } = req.body;
+
+    const { data: message, error } = await supabase
+      .from('messages')
+      .update({ delivery_status: 'delivered' })
+      .eq('id', message_id)
+      .eq('receiver_id', receiver_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Emit delivery status update
+    io.to(`conversation_${message.conversation_id}`).emit('message_delivered', {
+      message_id: message_id,
+      conversation_id: message.conversation_id
+    });
+
+    res.json({ message: 'Message marked as delivered' });
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
@@ -1472,14 +2044,28 @@ app.put('/api/conversations/:conversation_id/messages/read', async (req, res) =>
     const { conversation_id } = req.params;
     const { user_id } = req.body;
 
-    const { error } = await supabase
+    const { data: messages, error } = await supabase
       .from('messages')
-      .update({ is_read: true })
+      .update({ 
+        is_read: true,
+        delivery_status: 'read'
+      })
       .eq('conversation_id', conversation_id)
       .eq('receiver_id', user_id)
-      .eq('is_read', false);
+      .eq('is_read', false)
+      .select('id, conversation_id');
 
     if (error) throw error;
+
+    // Emit read status updates for each message
+    if (messages && messages.length > 0) {
+      messages.forEach(msg => {
+        io.to(`conversation_${msg.conversation_id}`).emit('message_read', {
+          message_id: msg.id,
+          conversation_id: msg.conversation_id
+        });
+      });
+    }
 
     res.json({ message: 'Messages marked as read' });
   } catch (error) {
@@ -1492,15 +2078,47 @@ app.get('/api/users/:user_id/unread-messages', async (req, res) => {
   try {
     const { user_id } = req.params;
 
-    const { count, error } = await supabase
-      .from('messages')
-      .select('*', { count: 'exact', head: true })
-      .eq('receiver_id', user_id)
-      .eq('is_read', false);
+    // Count conversations that have unread messages for this user
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id')
+      .or(`user1_id.eq.${user_id},user2_id.eq.${user_id}`);
 
     if (error) throw error;
 
-    res.json({ count: count || 0 });
+    if (data.length === 0) {
+      res.json({ count: 0 });
+      return;
+    }
+
+    // Get conversation IDs for this user
+    const conversationIds = data.map(c => c.id);
+
+    // Count conversations that have unread messages
+    const { count, error: countError } = await supabase
+      .from('messages')
+      .select('conversation_id', { count: 'exact', head: true })
+      .in('conversation_id', conversationIds)
+      .eq('receiver_id', user_id)
+      .eq('is_read', false);
+
+    if (countError) throw countError;
+
+    // Get unique conversation IDs with unread messages
+    const { data: unreadConversations, error: unreadError } = await supabase
+      .from('messages')
+      .select('conversation_id')
+      .in('conversation_id', conversationIds)
+      .eq('receiver_id', user_id)
+      .eq('is_read', false);
+
+    if (unreadError) throw unreadError;
+
+    // Count unique conversations with unread messages
+    const uniqueConversations = [...new Set(unreadConversations.map(m => m.conversation_id))];
+    const conversationCount = uniqueConversations.length;
+
+    res.json({ count: conversationCount });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1550,7 +2168,198 @@ app.get('/api/conversations/:conversation_id/typing', async (req, res) => {
   }
 });
 
+// ==================== SUPPORT ENDPOINTS ====================
+
+// Toggle support/un-support
+app.post('/api/supports/toggle', async (req, res) => {
+  try {
+    const { supporter_id, supported_id } = req.body;
+
+    if (!supporter_id || !supported_id) {
+      return res.status(400).json({ error: 'supporter_id and supported_id are required' });
+    }
+
+    // Check if support already exists
+    const { data: existingSupport, error: checkError } = await supabase
+      .from('supports')
+      .select('id')
+      .eq('supporter_id', supporter_id)
+      .eq('supported_id', supported_id)
+      .single();
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      throw checkError;
+    }
+
+    if (existingSupport) {
+      // Remove support (un-support)
+      const { error: deleteError } = await supabase
+        .from('supports')
+        .delete()
+        .eq('supporter_id', supporter_id)
+        .eq('supported_id', supported_id);
+
+      if (deleteError) throw deleteError;
+
+      // Get updated counts
+      const [supporterCount, supportingCount] = await Promise.all([
+        getSupporterCount(supported_id),
+        getSupportingCount(supporter_id)
+      ]);
+
+      res.json({
+        action: 'un_supported',
+        supported_user_supporter_count: supporterCount,  // Count for the user being un-supported
+        supporter_user_supporting_count: supportingCount  // Count for the user doing the un-support
+      });
+    } else {
+      // Add support
+      const { error: insertError } = await supabase
+        .from('supports')
+        .insert({
+          supporter_id,
+          supported_id,
+          created_at: new Date().toISOString()
+        });
+
+      if (insertError) throw insertError;
+
+      // Create notification
+      const { data: supporterData } = await supabase
+        .from('users')
+        .select('display_name, avatar, user_type')
+        .eq('id', supporter_id)
+        .single();
+
+      if (supporterData) {
+        const { error: notificationError } = await supabase
+          .from('notifications')
+          .insert({
+            user_id: supported_id,
+            actor_id: supporter_id,
+            type: 'support',
+            message: `${supporterData.display_name || 'Someone'} has started supporting you`,
+            is_read: false,
+            created_at: new Date().toISOString()
+          });
+
+        if (notificationError) {
+          console.error('Error creating notification:', notificationError);
+        }
+      }
+
+      // Get updated counts
+      const [supporterCount, supportingCount] = await Promise.all([
+        getSupporterCount(supported_id),
+        getSupportingCount(supporter_id)
+      ]);
+
+      res.json({
+        action: 'supported',
+        supported_user_supporter_count: supporterCount,  // Count for the user being supported
+        supporter_user_supporting_count: supportingCount,  // Count for the user doing the support
+        notification_created: true
+      });
+    }
+  } catch (error) {
+    console.error('Error toggling support:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get supporter count for a user
+app.get('/api/supports/supporter-count/:user_id', async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    const count = await getSupporterCount(user_id);
+    res.json({ count });
+  } catch (error) {
+    console.error('Error getting supporter count:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get supporting count for a user
+app.get('/api/supports/supporting-count/:user_id', async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    const count = await getSupportingCount(user_id);
+    res.json({ count });
+  } catch (error) {
+    console.error('Error getting supporting count:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check if user is supporting another user
+app.post('/api/supports/check', async (req, res) => {
+  try {
+    const { supporter_id, supported_id } = req.body;
+
+    if (!supporter_id || !supported_id) {
+      return res.status(400).json({ error: 'supporter_id and supported_id are required' });
+    }
+
+    const { data, error } = await supabase
+      .from('supports')
+      .select('id')
+      .eq('supporter_id', supporter_id)
+      .eq('supported_id', supported_id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    res.json({ is_supporting: !!data });
+  } catch (error) {
+    console.error('Error checking support status:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get both supporter and supporting counts for a user
+app.get('/api/supports/counts/:user_id', async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    const [supporterCount, supportingCount] = await Promise.all([
+      getSupporterCount(user_id),
+      getSupportingCount(user_id)
+    ]);
+
+    res.json({
+      supporter_count: supporterCount,
+      supporting_count: supportingCount
+    });
+  } catch (error) {
+    console.error('Error getting support counts:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Helper functions for support counts
+async function getSupporterCount(userId) {
+  const { count, error } = await supabase
+    .from('supports')
+    .select('*', { count: 'exact', head: true })
+    .eq('supported_id', userId);
+
+  if (error) throw error;
+  return count || 0;
+}
+
+async function getSupportingCount(userId) {
+  const { count, error } = await supabase
+    .from('supports')
+    .select('*', { count: 'exact', head: true })
+    .eq('supporter_id', userId);
+
+  if (error) throw error;
+  return count || 0;
+}
+
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Socket.IO server ready for real-time notifications`);
 }); 

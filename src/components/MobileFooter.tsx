@@ -28,14 +28,13 @@ export const MobileFooter = ({
     { id: "search", icon: Search, label: "Search" },
     { id: "notifications", icon: Bell, label: "Notifications" },
     { id: "messages", icon: MessageSquare, label: "Messages" },
-    { id: "logout", icon: LogOut, label: "Logout" },
+    { id: "profile", icon: User, label: "Profile" },
   ];
 
   const handleNavClick = (tabId: string) => {
-    if (tabId === "logout") {
-      localStorage.removeItem('userEmail');
-      setIsAuthenticated(false);
-    } else if (tabId === "profile" && userProfile) {
+    console.log('Mobile footer nav click:', tabId);
+    if (tabId === "profile" && userProfile) {
+      console.log('Navigating to profile from mobile footer');
       setActiveTab("profile");
     } else {
       setActiveTab(tabId);

@@ -136,23 +136,57 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
     }
   };
 
-  const handleProfileClick = () => {
+  const handleProfileClick = async () => {
     if (onProfileClick) {
-      onProfileClick({
-        id: post.user_id,
-        name: post.author_name || post.display_name,
-        username: `@${(post.author_name || post.display_name || post.email)?.toLowerCase().replace(/\s+/g, '')}`,
-        avatar: post.avatar || "/placeholder.svg",
-        sport: post.category || post.user_type,
-        verified: false,
-        bio: `Professional ${post.category || post.user_type} User`,
-        coverImage: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
-        location: "New York, USA",
-        joinDate: "March 2022",
-        followers: Math.floor(Math.random() * 50000) + 10000,
-        following: Math.floor(Math.random() * 1000) + 100,
-        posts: Math.floor(Math.random() * 200) + 50,
-      });
+      try {
+        // Fetch complete user profile data from backend
+        const response = await fetch(`${getBackendUrl()}/api/users/${post.user_id}`);
+        if (response.ok) {
+          const completeProfile = await response.json();
+          console.log("PostDetailView: Complete profile fetched:", completeProfile);
+          onProfileClick(completeProfile);
+        } else {
+          console.error('Failed to fetch complete profile, using fallback');
+          // Fallback to basic profile data if fetch fails
+          onProfileClick({
+            id: post.user_id,
+            name: post.author_name || post.display_name,
+            display_name: post.author_name || post.display_name,
+            username: `@${(post.author_name || post.display_name || post.email)?.toLowerCase().replace(/\s+/g, '')}`,
+            avatar: post.avatar || "/placeholder.svg",
+            sport: post.category || post.user_type,
+            user_type: post.category || post.user_type,
+            verified: false,
+            bio: `Professional ${post.category || post.user_type} User`,
+            coverImage: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
+            location: "New York, USA",
+            joinDate: "March 2022",
+            followers: Math.floor(Math.random() * 50000) + 10000,
+            following: Math.floor(Math.random() * 1000) + 100,
+            posts: Math.floor(Math.random() * 200) + 50,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching complete profile:', error);
+        // Fallback to basic profile data if fetch fails
+        onProfileClick({
+          id: post.user_id,
+          name: post.author_name || post.display_name,
+          display_name: post.author_name || post.display_name,
+          username: `@${(post.author_name || post.display_name || post.email)?.toLowerCase().replace(/\s+/g, '')}`,
+          avatar: post.avatar || "/placeholder.svg",
+          sport: post.category || post.user_type,
+          user_type: post.category || post.user_type,
+          verified: false,
+          bio: `Professional ${post.category || post.user_type} User`,
+          coverImage: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
+          location: "New York, USA",
+          joinDate: "March 2022",
+          followers: Math.floor(Math.random() * 50000) + 10000,
+          following: Math.floor(Math.random() * 1000) + 100,
+          posts: Math.floor(Math.random() * 200) + 50,
+        });
+      }
     }
   };
 
@@ -160,7 +194,14 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
   const getAvatarUrl = (avatar?: string) => {
     if (!avatar) return "/placeholder.svg";
     if (avatar.startsWith("http")) return avatar;
-    return `https://trofify-media.s3.amazonaws.com/${avatar}`;
+    return "/placeholder.svg";
+  };
+
+  // Helper to get the correct media URL
+  const getMediaUrl = (mediaUrl?: string) => {
+    if (!mediaUrl) return "/placeholder.svg";
+    if (mediaUrl.startsWith("http")) return mediaUrl;
+    return "/placeholder.svg";
   };
 
   return (
@@ -243,14 +284,14 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
             <div className="border-b-2 border-border">
               {post.media_type === 'video' ? (
                 <video
-                  src={post.media_url.startsWith('http') ? post.media_url : `https://trofify-media.s3.amazonaws.com/${post.media_url}`}
+                  src={getMediaUrl(post.media_url)}
                   controls
                   className="w-full object-cover"
                   style={{ maxHeight: '60vh' }}
                 />
               ) : (
                 <img
-                  src={post.image || (post.images && post.images.length > 0 ? post.images[0] : (post.media_url?.startsWith('http') ? post.media_url : `https://trofify-media.s3.amazonaws.com/${post.media_url}`))}
+                  src={getMediaUrl(post.image || (post.images && post.images.length > 0 ? post.images[0] : post.media_url))}
                   alt="Post content"
                   className="w-full object-cover"
                   style={{ maxHeight: '60vh' }}
@@ -274,7 +315,7 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
                       variant="ghost"
                       size="sm"
                       onClick={handleLike}
-                      className={`px-4 py-2 transform -skew-x-12 ${liked ? "bg-red-500/20 text-red-500" : "bg-[#0e9591]/10 text-[#0e9591] hover:bg-[#0e9591]/20"}`}
+                      className={`px-4 py-2 transform -skew-x-12 ${liked ? "bg-[#0e9591]/20 text-[#0e9591]" : "bg-[#0e9591]/10 text-[#0e9591] hover:bg-[#0e9591]/20"}`}
                     >
                       <div className="transform skew-x-12 flex items-center">
                         <Heart className={`h-4 w-4 mr-2 ${liked ? "fill-current" : ""}`} />

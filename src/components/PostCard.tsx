@@ -22,6 +22,7 @@ import {
   CarouselContent,
   CarouselItem,
 } from "@/components/ui/carousel";
+import { getBackendUrl } from "@/lib/utils";
 
 interface PostCardProps {
   post: any;
@@ -40,23 +41,43 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
   const [liked, setLiked] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const handleProfileClick = () => {
+  const handleProfileClick = async () => {
     if (onProfileClick) {
-      // Use the full profile object if available, otherwise create a basic one
-      if (post.author.profile) {
-        console.log("PostCard: Using full profile object:", post.author.profile);
-        onProfileClick(post.author.profile);
-      } else {
-        // Fallback to basic profile data with proper structure
+      try {
+        // Fetch complete user profile data from backend
+        const response = await fetch(`${getBackendUrl()}/api/users/${post.author.id}`);
+        if (response.ok) {
+          const completeProfile = await response.json();
+          console.log("PostCard: Complete profile fetched:", completeProfile);
+          onProfileClick(completeProfile);
+        } else {
+          console.error('Failed to fetch complete profile, using fallback');
+          // Fallback to basic profile data if fetch fails
+          const fallbackProfile = {
+            id: post.author.id,
+            name: post.author.name,
+            display_name: post.author.name,
+            email: post.author.username.replace('@', ''),
+            avatar: post.author.avatar,
+            sport: post.author.sport,
+            user_type: post.author.sport,
+            description: `Professional ${post.author.sport} Player | Passionate about sports and fitness`,
+            badge: post.author.sport,
+          };
+          console.log("PostCard: Using fallback profile:", fallbackProfile);
+          onProfileClick(fallbackProfile);
+        }
+      } catch (error) {
+        console.error('Error fetching complete profile:', error);
+        // Fallback to basic profile data if fetch fails
         const fallbackProfile = {
-          id: post.author.id, // This is the crucial field for fetching posts
+          id: post.author.id,
           name: post.author.name,
-          display_name: post.author.name, // Add display_name for consistency
-          email: post.author.username.replace('@', ''), // Extract email from username
+          display_name: post.author.name,
+          email: post.author.username.replace('@', ''),
           avatar: post.author.avatar,
           sport: post.author.sport,
-          user_type: post.author.sport, // Map sport to user_type
-          // Add other fields that ProfileView expects
+          user_type: post.author.sport,
           description: `Professional ${post.author.sport} Player | Passionate about sports and fitness`,
           badge: post.author.sport,
         };
@@ -86,7 +107,7 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
   const getAvatarUrl = (avatar?: string) => {
     if (!avatar) return "/placeholder.svg";
     if (avatar.startsWith("http")) return avatar;
-    return `https://trofify-media.s3.amazonaws.com/${avatar}`;
+    return "/placeholder.svg";
   };
 
   // Helper to get all images for the post

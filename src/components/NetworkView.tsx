@@ -2,6 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { UserPlus, MessageSquare, Users } from "lucide-react";
+import { getBackendUrl } from "@/lib/utils";
 
 interface NetworkViewProps {
   onProfileClick?: (profile: any) => void;
@@ -41,23 +42,57 @@ export const NetworkView = ({ onProfileClick }: NetworkViewProps) => {
     },
   ];
 
-  const handleProfileClick = (connection: any) => {
+  const handleProfileClick = async (connection: any) => {
     if (onProfileClick) {
-      onProfileClick({
-        name: connection.name,
-        username: connection.username,
-        avatar: connection.avatar,
-        sport: connection.sport,
-        verified: false,
-        bio: `Professional ${connection.sport}`,
-        coverImage:
-          "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
-        location: "New York, USA",
-        joinDate: "March 2022",
-        followers: Math.floor(Math.random() * 50000) + 10000,
-        following: Math.floor(Math.random() * 1000) + 100,
-        posts: Math.floor(Math.random() * 200) + 50,
-      });
+      try {
+        // Fetch complete user profile data from backend
+        const response = await fetch(`${getBackendUrl()}/api/users/${connection.id}`);
+        if (response.ok) {
+          const completeProfile = await response.json();
+          console.log("NetworkView: Complete profile fetched:", completeProfile);
+          onProfileClick(completeProfile);
+        } else {
+          console.error('Failed to fetch complete profile, using fallback');
+          // Fallback to basic profile data if fetch fails
+          onProfileClick({
+            id: connection.id,
+            name: connection.name,
+            display_name: connection.name,
+            username: connection.username,
+            avatar: connection.avatar,
+            sport: connection.sport,
+            user_type: connection.sport,
+            verified: false,
+            bio: `Professional ${connection.sport}`,
+            coverImage: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
+            location: "New York, USA",
+            joinDate: "March 2022",
+            followers: Math.floor(Math.random() * 50000) + 10000,
+            following: Math.floor(Math.random() * 1000) + 100,
+            posts: Math.floor(Math.random() * 200) + 50,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching complete profile:', error);
+        // Fallback to basic profile data if fetch fails
+        onProfileClick({
+          id: connection.id,
+          name: connection.name,
+          display_name: connection.name,
+          username: connection.username,
+          avatar: connection.avatar,
+          sport: connection.sport,
+          user_type: connection.sport,
+          verified: false,
+          bio: `Professional ${connection.sport}`,
+          coverImage: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
+          location: "New York, USA",
+          joinDate: "March 2022",
+          followers: Math.floor(Math.random() * 50000) + 10000,
+          following: Math.floor(Math.random() * 1000) + 100,
+          posts: Math.floor(Math.random() * 200) + 50,
+        });
+      }
     }
   };
 
@@ -65,7 +100,7 @@ export const NetworkView = ({ onProfileClick }: NetworkViewProps) => {
     <div className="w-full lg:max-w-4xl lg:mx-auto lg:p-4">
       <div className="bg-card rounded-none lg:rounded-lg shadow-sm p-6 border border-border">
         <h1 className="text-2xl font-bold text-foreground mb-6 flex items-center">
-          <Users className="h-6 w-6 mr-2 text-blue-500" />
+                          <Users className="h-6 w-6 mr-2 text-[#0e9591]" />
           My Network
         </h1>
 

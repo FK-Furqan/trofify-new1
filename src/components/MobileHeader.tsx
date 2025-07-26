@@ -27,6 +27,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem
 } from "@/components/ui/dropdown-menu";
+import { getBackendUrl, getAvatarUrlWithCacheBust, clearUserSession } from "@/lib/utils";
 
 interface MobileHeaderProps {
   activeTab: string;
@@ -48,6 +49,36 @@ export const MobileHeader = ({
   onNotificationClick,
 }: MobileHeaderProps) => {
   const [showSidebar, setShowSidebar] = useState(false);
+  const [profileImageKey, setProfileImageKey] = useState(0);
+  const [updateTimeout, setUpdateTimeout] = useState<NodeJS.Timeout | null>(null);
+
+  // Listen for profile image updates
+  useEffect(() => {
+    const handleProfileImageUpdate = (event: CustomEvent) => {
+      if (event.detail.userId === userProfile?.id) {
+        // Clear any existing timeout
+        if (updateTimeout) {
+          clearTimeout(updateTimeout);
+        }
+        
+        // Debounce the update to prevent flickering
+        const newTimeout = setTimeout(() => {
+          setProfileImageKey(prev => prev + 1);
+        }, 100);
+        
+        setUpdateTimeout(newTimeout);
+      }
+    };
+
+    window.addEventListener('profileImageUpdated', handleProfileImageUpdate as EventListener);
+    
+    return () => {
+      window.removeEventListener('profileImageUpdated', handleProfileImageUpdate as EventListener);
+      if (updateTimeout) {
+        clearTimeout(updateTimeout);
+      }
+    };
+  }, [userProfile?.id, updateTimeout]);
 
   // Prevent background scroll when sidebar is open
   useEffect(() => {
@@ -100,7 +131,12 @@ export const MobileHeader = ({
   ];
 
   const handleProfileClick = () => {
-    setActiveTab("profile");
+    console.log('Mobile header profile clicked');
+    if (userProfile) {
+      setActiveTab("profile");
+    } else {
+      console.error('No user profile available for mobile header profile click');
+    }
   };
 
   const handleMenuItemClick = (itemId: string) => {
@@ -110,11 +146,6 @@ export const MobileHeader = ({
 
   // Remove fallback dummy profile
   const profile = userProfile;
-  const getAvatarUrl = (avatar?: string) => {
-    if (!avatar) return "/placeholder.svg";
-    if (avatar.startsWith("http")) return avatar;
-    return `https://trofify-media.s3.amazonaws.com/${avatar}`;
-  };
 
   return (
     <>
@@ -181,7 +212,8 @@ export const MobileHeader = ({
             >
               <Avatar className="h-8 w-8">
                 <AvatarImage
-                  src={getAvatarUrl(profile?.avatar)}
+                  key={`mobile-avatar-${profileImageKey}`}
+                  src={getAvatarUrlWithCacheBust(profile?.avatar)}
                   alt="Profile"
                   onError={e => { e.currentTarget.src = "/placeholder.svg"; }}
                 />
@@ -222,28 +254,47 @@ export const MobileHeader = ({
               </div>
 
               {/* User Info */}
-              <div className="flex items-center space-x-3">
-                <Avatar className="h-12 w-12">
+              <div className="flex flex-col items-center space-y-3">
+                <Avatar className="h-16 w-16">
                   <AvatarImage
-                    src={profile?.avatar}
+                    key={`mobile-sidebar-avatar-${profileImageKey}`}
+                    src={getAvatarUrlWithCacheBust(profile?.avatar)}
                     alt="Profile"
+                    onError={e => { e.currentTarget.src = "/placeholder.svg"; }}
                   />
-                  <AvatarFallback>
-                    <User className="h-6 w-6" />
+                  <AvatarFallback className="text-lg">
+                    {(profile?.display_name || profile?.name || profile?.email || "U")[0]}
                   </AvatarFallback>
                 </Avatar>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-foreground">{profile?.name}</h3>
-                  <p className="text-sm text-muted-foreground">{profile?.username}</p>
-                  {profile?.badge && (
-                    <Badge className="mt-1 bg-blue-100 text-blue-800 text-xs">{profile.badge}</Badge>
+                
+                {/* User Name and Type */}
+                <div className="text-center space-y-2">
+                  <h3 className="font-semibold text-foreground text-lg">
+                    {profile?.display_name || profile?.name || profile?.email}
+                  </h3>
+                  
+                  {/* User Type Badge */}
+                  {profile?.user_type && (
+                    <Badge 
+                      variant="secondary" 
+                      className="text-xs font-medium px-3 py-1 bg-[#0e9591] text-white"
+                    >
+                      {profile.user_type.charAt(0).toUpperCase() + profile.user_type.slice(1)}
+                    </Badge>
+                  )}
+                  
+                  {/* Sport Badge - if available */}
+                  {profile?.sport && (
+                    <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white px-3 py-1">
+                      {profile.sport}
+                    </Badge>
                   )}
                 </div>
               </div>
             </div>
 
             {/* Menu Options - Scrollable */}
-            <div className="flex-1 min-h-0 overflow-y-auto p-4">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 scrollbar-hide">
               <h3 className="font-semibold text-gray-900 mb-3">Menu</h3>
               <div className="space-y-1">
                 {[
@@ -265,41 +316,29 @@ export const MobileHeader = ({
                     <item.icon className="h-4 w-4 mr-3" />
                     {item.label}
                     {item.count && (
-                      <Badge className="ml-auto bg-blue-100 text-blue-800 text-xs">
+                      <Badge className="ml-auto bg-[#0e9591]/20 text-[#0e9591] text-xs">
                         {item.count}
                       </Badge>
                     )}
                   </Button>
                 ))}
+                
+                {/* Logout Button */}
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
+                  size="sm"
+                  onClick={() => {
+                    setShowSidebar(false);
+                    setIsAuthenticated(false);
+                  }}
+                >
+                  <LogOut className="h-4 w-4 mr-3" />
+                  Logout
+                </Button>
+                
+
               </div>
-            </div>
-
-            {/* Divider above logout button for clarity */}
-            <Separator className="my-2" />
-
-            {/* Logout Button - Always visible at bottom */}
-            <div className="p-4 border-t border-border bg-white dark:bg-gray-900">
-              <Button
-                variant="ghost"
-                className="w-full justify-start h-auto p-3 text-left text-destructive hover:text-destructive hover:bg-destructive/10"
-                onClick={() => {
-                  setShowSidebar(false);
-                  localStorage.removeItem('userEmail');
-                  setIsAuthenticated(false);
-                }}
-              >
-                <div className="flex items-center w-full">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-destructive/10 mr-4">
-                    <LogOut className="h-5 w-5" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-medium text-base">Log Out</div>
-                    <div className="text-sm text-muted-foreground">
-                      Sign out of your account
-                    </div>
-                  </div>
-                </div>
-              </Button>
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -7,13 +7,7 @@ import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { X, Upload, Image as ImageIcon, Video, Camera } from "lucide-react";
 import { toast } from "sonner";
-
-// Helper function to get backend URL
-const getBackendUrl = () => {
-  return process.env.NODE_ENV === 'production' 
-    ? 'https://your-production-backend.com' 
-    : 'http://localhost:5000';
-};
+import { getBackendUrl } from "@/lib/utils";
 
 export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
   console.log('CreateStory rendered with props:', { user: !!user, open: open, onOpenChange: !!onOpenChange });
@@ -26,22 +20,71 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+
+  // Detect mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      const userAgent = navigator.userAgent || navigator.vendor || window['opera'];
+      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent.toLowerCase());
+      const isMobileViewport = window.innerWidth <= 768;
+      setIsMobile(isMobileDevice || isMobileViewport);
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  const handleCameraClick = () => {
+    if (isMobile) {
+      // On mobile, open camera directly
+      if (cameraInputRef.current) {
+        cameraInputRef.current.click();
+      }
+    } else {
+      // On desktop, show a message that camera is mobile-only
+      toast.info("Camera capture is only available on mobile devices");
+    }
+  };
 
   const handleFileSelect = (event) => {
     const file = event.target.files[0];
     if (file) {
       // Validate file type
-      const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/webm'];
+      const validTypes = [
+        // Images
+        'image/jpeg', 
+        'image/jpg', 
+        'image/png', 
+        'image/gif', 
+        'image/webp', 
+        'image/heic', 
+        'image/heif',
+        'image/bmp',
+        'image/tiff',
+        'image/svg+xml',
+        // Videos
+        'video/mp4',
+        'video/webm',
+        'video/ogg',
+        'video/quicktime',
+        'video/x-msvideo',
+        'video/x-ms-wmv',
+        'video/x-flv',
+        'video/3gpp',
+        'video/3gpp2'
+      ];
       if (!validTypes.includes(file.type)) {
-        toast.error("Please select a valid image or video file");
+        toast.error(`Unsupported file type: ${file.type}. Please select a valid image or video file.`);
         return;
       }
 
-      // Validate file size (10MB limit)
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error("File size must be less than 10MB");
+      // Validate file size (50MB limit for videos)
+      if (file.size > 50 * 1024 * 1024) {
+        toast.error("File size must be less than 50MB");
         return;
       }
 
@@ -187,7 +230,7 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => cameraInputRef.current?.click()}
+                      onClick={handleCameraClick}
                       disabled={uploading}
                     >
                       <Camera className="h-4 w-4 mr-2" />
@@ -200,7 +243,7 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
               <Input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,video/*"
+                accept="image/*,video/*,.heic,.heif,.bmp,.tiff,.svg"
                 onChange={handleFileSelect}
                 className="hidden"
                 disabled={uploading}
@@ -209,7 +252,7 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
               <Input
                 ref={cameraInputRef}
                 type="file"
-                accept="image/*,video/*"
+                accept="image/*,video/*,.heic,.heif,.bmp,.tiff,.svg"
                 capture="environment"
                 onChange={handleFileSelect}
                 className="hidden"

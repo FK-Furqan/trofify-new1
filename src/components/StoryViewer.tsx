@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { X, ChevronLeft, ChevronRight, Trash2, Loader2, Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { getBackendUrl } from "@/lib/utils";
 
 interface Story {
   id: string;
@@ -121,7 +122,7 @@ export const StoryViewer = ({
     
     try {
       // Fetch like count
-      const countRes = await fetch(`http://localhost:5000/api/stories/${storyId}/likes/count`);
+              const countRes = await fetch(`${getBackendUrl()}/api/stories/${storyId}/likes/count`);
       if (countRes.ok) {
         const countData = await countRes.json();
         setLikeCount(countData.count || 0);
@@ -129,7 +130,7 @@ export const StoryViewer = ({
       
       // Fetch user's like status
       if (currentUserId) {
-        const likeRes = await fetch(`http://localhost:5000/api/stories/${storyId}/likes/status?user_id=${currentUserId}`);
+        const likeRes = await fetch(`${getBackendUrl()}/api/stories/${storyId}/likes/status?user_id=${currentUserId}`);
         if (likeRes.ok) {
           const likeData = await likeRes.json();
           setIsLiked(likeData.isLiked || false);
@@ -165,7 +166,7 @@ export const StoryViewer = ({
     
     try {
       const method = isLiked ? 'DELETE' : 'POST';
-      const res = await fetch(`http://localhost:5000/api/stories/${storyId}/likes`, {
+              const res = await fetch(`${getBackendUrl()}/api/stories/${storyId}/likes`, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: currentUserId }),
@@ -191,7 +192,7 @@ export const StoryViewer = ({
     setIsDeleting(true);
     
     try {
-      const res = await fetch(`http://localhost:5000/api/stories/${storyId}`, {
+              const res = await fetch(`${getBackendUrl()}/api/stories/${storyId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: currentUserId }),
@@ -360,7 +361,7 @@ export const StoryViewer = ({
               size="sm"
               onClick={() => handleLikeToggle(currentStory.id)}
               disabled={isLiking}
-              className={`text-white hover:bg-white/20 ${isLiked ? 'text-red-500' : ''}`}
+                              className={`text-white hover:bg-white/20 ${isLiked ? 'text-[#0e9591]' : ''}`}
             >
               <Heart className={`h-5 w-5 ${isLiked ? 'fill-current' : ''}`} />
             </Button>
@@ -376,7 +377,7 @@ export const StoryViewer = ({
               size="sm"
               onClick={() => handleDeleteStory(currentStory.id)}
               disabled={isDeleting}
-              className="text-white hover:bg-red-500/20 hover:text-red-400"
+                              className="text-white hover:bg-[#0e9591]/20 hover:text-[#0e9591]"
             >
               <Trash2 className="h-5 w-5" />
             </Button>

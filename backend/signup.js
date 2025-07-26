@@ -134,16 +134,23 @@ router.post('/login', async (req, res) => {
 router.post('/profile', async (req, res) => {
   const { email } = req.body;
   try {
-    // Get user base info
+    // Get user base info including avatar from users table
     const { data: user, error: userError } = await supabase
       .from('users')
-      .select('id, email, user_type, display_name')
+      .select('id, email, user_type, display_name, avatar')
       .eq('email', email)
       .single();
     if (userError || !user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // Get profile image from profile-photo bucket (if exists)
+
+    // If user already has an avatar in the users table, use that
+    if (user.avatar) {
+      console.log('Using avatar from users table:', user.avatar);
+      return res.json(user);
+    }
+
+    // Fallback: Get profile image from profile-photo bucket (if exists)
     let avatar = null;
     try {
       const { data: mediaData, error: mediaError } = await supabase
@@ -158,11 +165,18 @@ router.post('/profile', async (req, res) => {
           .createSignedUrl(user.id + '/' + fileName, 60 * 60 * 24);
         if (!signedUrlError && signedUrlData) {
           avatar = signedUrlData.signedUrl;
+          
+          // Update the users table with this avatar for future requests
+          await supabase
+            .from('users')
+            .update({ avatar: avatar })
+            .eq('id', user.id);
         }
       }
     } catch (mediaErr) {
-      // No avatar, that's fine
+      console.log('No avatar found in storage:', mediaErr);
     }
+    
     res.json({ ...user, avatar });
   } catch (err) {
     console.error(err);

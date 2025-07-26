@@ -7,6 +7,7 @@ export interface Message {
   receiver_id: string;
   content: string;
   is_read: boolean;
+  delivery_status: 'sent' | 'delivered' | 'read';
   created_at: string;
   sender?: {
     id: string;
@@ -37,6 +38,8 @@ export interface Conversation {
   updated_at: string;
   last_message_at: string;
   last_message?: string;
+  last_message_delivery_status?: 'sent' | 'delivered' | 'read';
+  last_message_sender_id?: string;
   unread_count?: number;
 }
 
@@ -149,6 +152,26 @@ class MessagingService {
       }
     } catch (error) {
       console.error('Error marking messages as read:', error);
+      throw error;
+    }
+  }
+
+  // Mark message as delivered
+  async markMessageAsDelivered(messageId: string, receiverId: string): Promise<void> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/messages/${messageId}/delivered`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ receiver_id: receiverId }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to mark message as delivered');
+      }
+    } catch (error) {
+      console.error('Error marking message as delivered:', error);
       throw error;
     }
   }

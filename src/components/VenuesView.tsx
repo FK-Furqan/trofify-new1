@@ -37,7 +37,7 @@ export const VenuesView = () => {
       <div className="bg-card rounded-none lg:rounded-lg shadow-sm lg:mx-0 p-0 m-0 border-0">
         <div className="p-3 sm:p-6 border-b border-border">
           <h1 className="text-2xl font-bold text-foreground flex items-center">
-            <MapPin className="h-6 w-6 mr-2 text-red-500" />
+            <MapPin className="h-6 w-6 mr-2 text-[#0e9591]" />
             Venues Nearby
           </h1>
         </div>

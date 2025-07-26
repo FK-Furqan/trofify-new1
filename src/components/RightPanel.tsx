@@ -85,7 +85,7 @@ export const RightPanel = ({ onProfileClick }: RightPanelProps) => {
                       </div>
                     )}
                   </div>
-                  <Badge variant="secondary" className="text-xs mt-1">
+                  <Badge variant="secondary" className="text-xs mt-1 bg-[#0e9591] text-white">
                     {person.sport}
                   </Badge>
                   <p className="text-xs text-muted-foreground mt-1">

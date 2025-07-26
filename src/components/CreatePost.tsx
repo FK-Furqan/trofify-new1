@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
@@ -6,15 +6,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { X, Upload, Image as ImageIcon, Video, Smile, MapPin } from "lucide-react";
+import { X, Upload, Image as ImageIcon, Video, Smile, MapPin, Camera } from "lucide-react";
 import { toast } from "sonner";
-
-// Helper function to get backend URL
-const getBackendUrl = () => {
-  return process.env.NODE_ENV === 'production' 
-    ? 'https://your-production-backend.com' 
-    : 'http://localhost:5000';
-};
+import { getBackendUrl } from "@/lib/utils";
 
 export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenChange }) => {
   console.log('CreatePost rendered with props:', { user: !!user, open: controlledOpen, onOpenChange: !!onOpenChange });
@@ -28,20 +22,70 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
 
-  const handleFileSelect = (event) => {
-    const files = Array.from(event.target.files);
-    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  // Detect mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      const userAgent = navigator.userAgent || navigator.vendor || window['opera'];
+      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent.toLowerCase());
+      const isMobileViewport = window.innerWidth <= 768;
+      setIsMobile(isMobileDevice || isMobileViewport);
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  const handleCameraClick = () => {
+    if (isMobile) {
+      // On mobile, open camera directly
+      if (cameraInputRef.current) {
+        cameraInputRef.current.click();
+      }
+    } else {
+      // On desktop, show a message that camera is mobile-only
+      toast.info("Camera capture is only available on mobile devices");
+    }
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    const validTypes = [
+      // Images
+      'image/jpeg', 
+      'image/jpg', 
+      'image/png', 
+      'image/gif', 
+      'image/webp', 
+      'image/heic', 
+      'image/heif',
+      'image/bmp',
+      'image/tiff',
+      'image/svg+xml',
+      // Videos
+      'video/mp4',
+      'video/webm',
+      'video/ogg',
+      'video/quicktime',
+      'video/x-msvideo',
+      'video/x-ms-wmv',
+      'video/x-flv',
+      'video/3gpp',
+      'video/3gpp2'
+    ];
     const newFiles: File[] = [];
     const newPreviews: string[] = [];
     for (const file of files) {
       if (!validTypes.includes(file.type)) {
-        toast.error("Please select a valid image file");
+        toast.error(`Unsupported file type: ${file.type}. Please select a valid image or video file.`);
         continue;
       }
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error("File size must be less than 10MB");
+      if (file.size > 50 * 1024 * 1024) { // Increased to 50MB for videos
+        toast.error("File size must be less than 50MB");
         continue;
       }
       newFiles.push(file);
@@ -121,11 +165,6 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
     }
   };
 
-  const getFileType = () => {
-    if (!selectedFile) return null;
-    return selectedFile.type.startsWith('video/') ? 'video' : 'image';
-  };
-
   return (
     <Dialog open={controlledOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
@@ -190,15 +229,36 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
                 size="sm"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="text-blue-600 hover:text-blue-700"
+                className="text-[#0e9591] hover:text-[#087a74]"
               >
                 <Upload className="h-4 w-4 mr-1" />
                 Media
               </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleCameraClick}
+                disabled={uploading}
+                className="text-[#0e9591] hover:text-[#087a74]"
+              >
+                <Camera className="h-4 w-4 mr-1" />
+                Camera
+              </Button>
               <Input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*,.heic,.heif,.bmp,.tiff,.svg"
+                multiple
+                onChange={handleFileSelect}
+                className="hidden"
+                disabled={uploading}
+              />
+              <Input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*,video/*,.heic,.heif,.bmp,.tiff,.svg"
+                capture="environment"
                 multiple
                 onChange={handleFileSelect}
                 className="hidden"

@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Search, Bell, MessageSquare, User, Menu, Home, Users, Video, Calendar, Trophy, MapPin, Bookmark, Settings, X, Plus, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem
 } from "@/components/ui/dropdown-menu";
+import { getBackendUrl, getAvatarUrlWithCacheBust } from "@/lib/utils";
 
 interface HeaderProps {
   activeTab: string;
@@ -26,6 +27,36 @@ interface HeaderProps {
 export const Header = ({ activeTab, setActiveTab, setIsAuthenticated, userProfile, notificationCount = 0, messageCount = 0, onNotificationClick }: HeaderProps) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [profileImageKey, setProfileImageKey] = useState(0);
+  const [updateTimeout, setUpdateTimeout] = useState<NodeJS.Timeout | null>(null);
+
+  // Listen for profile image updates
+  useEffect(() => {
+    const handleProfileImageUpdate = (event: CustomEvent) => {
+      if (event.detail.userId === userProfile?.id) {
+        // Clear any existing timeout
+        if (updateTimeout) {
+          clearTimeout(updateTimeout);
+        }
+        
+        // Debounce the update to prevent flickering
+        const newTimeout = setTimeout(() => {
+          setProfileImageKey(prev => prev + 1);
+        }, 100);
+        
+        setUpdateTimeout(newTimeout);
+      }
+    };
+
+    window.addEventListener('profileImageUpdated', handleProfileImageUpdate as EventListener);
+    
+    return () => {
+      window.removeEventListener('profileImageUpdated', handleProfileImageUpdate as EventListener);
+      if (updateTimeout) {
+        clearTimeout(updateTimeout);
+      }
+    };
+  }, [userProfile?.id, updateTimeout]);
 
   // Update navItems for desktop navigation
   const navItems = [
@@ -48,11 +79,6 @@ export const Header = ({ activeTab, setActiveTab, setIsAuthenticated, userProfil
 
   // Remove fallback dummy profile
   const profile = userProfile;
-  const getAvatarUrl = (avatar?: string) => {
-    if (!avatar) return "/placeholder.svg";
-    if (avatar.startsWith("http")) return avatar;
-    return `https://trofify-media.s3.amazonaws.com/${avatar}`;
-  };
 
   return (
     <>
@@ -149,12 +175,13 @@ export const Header = ({ activeTab, setActiveTab, setIsAuthenticated, userProfil
                   className="hidden sm:flex p-2"
                 >
                   <span className="inline-block w-8 h-8 rounded-full overflow-hidden bg-gray-200">
-                    <img
-                      src={getAvatarUrl(profile.avatar)}
-                      alt="Profile"
-                      className="w-full h-full object-cover"
-                      onError={e => { e.currentTarget.src = "/placeholder.svg"; }}
-                    />
+                                          <img
+                        key={`header-avatar-${profileImageKey}`}
+                        src={getAvatarUrlWithCacheBust(profile.avatar)}
+                        alt="Profile"
+                        className="w-full h-full object-cover"
+                        onError={e => { e.currentTarget.src = "/placeholder.svg"; }}
+                      />
                   </span>
                 </Button>
               ) : null}

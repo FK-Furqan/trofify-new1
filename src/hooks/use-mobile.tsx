@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getBackendUrl } from '@/lib/utils';
 
 export const useMobile = () => {
   const [isMobile, setIsMobile] = useState(false);
@@ -25,7 +26,7 @@ export const useRealTimeMessages = (currentUserId?: string, isActive: boolean = 
     if (!currentUserId) return;
     
     try {
-      const response = await fetch(`http://localhost:5000/api/users/${currentUserId}/unread-messages`);
+      const response = await fetch(`${getBackendUrl()}/api/users/${currentUserId}/unread-messages`);
       if (response.ok) {
         const data = await response.json();
         setMessageCount(data.count || 0);

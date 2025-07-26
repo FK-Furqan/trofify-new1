@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Heart, MessageCircle, Share, Play, Pause } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { getBackendUrl } from "@/lib/utils";
 
 interface ReelsViewProps {
   onProfileClick?: (profile: any) => void;
@@ -43,22 +44,57 @@ export const ReelsView = ({ onProfileClick }: ReelsViewProps) => {
     }
   ];
 
-  const handleProfileClick = (author: any) => {
+  const handleProfileClick = async (author: any) => {
     if (onProfileClick) {
-      onProfileClick({
-        name: author.name,
-        username: author.username,
-        avatar: author.avatar,
-        sport: author.sport,
-        verified: false,
-        bio: `Professional ${author.sport} Player`,
-        coverImage: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
-        location: "New York, USA",
-        joinDate: "March 2022",
-        followers: Math.floor(Math.random() * 50000) + 10000,
-        following: Math.floor(Math.random() * 1000) + 100,
-        posts: Math.floor(Math.random() * 200) + 50
-      });
+      try {
+        // Fetch complete user profile data from backend
+        const response = await fetch(`${getBackendUrl()}/api/users/${author.id}`);
+        if (response.ok) {
+          const completeProfile = await response.json();
+          console.log("ReelsView: Complete profile fetched:", completeProfile);
+          onProfileClick(completeProfile);
+        } else {
+          console.error('Failed to fetch complete profile, using fallback');
+          // Fallback to basic profile data if fetch fails
+          onProfileClick({
+            id: author.id,
+            name: author.name,
+            display_name: author.name,
+            username: author.username,
+            avatar: author.avatar,
+            sport: author.sport,
+            user_type: author.sport,
+            verified: false,
+            bio: `Professional ${author.sport} Player`,
+            coverImage: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
+            location: "New York, USA",
+            joinDate: "March 2022",
+            followers: Math.floor(Math.random() * 50000) + 10000,
+            following: Math.floor(Math.random() * 1000) + 100,
+            posts: Math.floor(Math.random() * 200) + 50
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching complete profile:', error);
+        // Fallback to basic profile data if fetch fails
+        onProfileClick({
+          id: author.id,
+          name: author.name,
+          display_name: author.name,
+          username: author.username,
+          avatar: author.avatar,
+          sport: author.sport,
+          user_type: author.sport,
+          verified: false,
+          bio: `Professional ${author.sport} Player`,
+          coverImage: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
+          location: "New York, USA",
+          joinDate: "March 2022",
+          followers: Math.floor(Math.random() * 50000) + 10000,
+          following: Math.floor(Math.random() * 1000) + 100,
+          posts: Math.floor(Math.random() * 200) + 50
+        });
+      }
     }
   };
 

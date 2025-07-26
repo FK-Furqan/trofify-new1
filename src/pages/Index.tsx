@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { MobileHeader } from "@/components/MobileHeader";
 import { MobileFooter } from "@/components/MobileFooter";
 import { Sidebar } from "@/components/Sidebar";
@@ -20,11 +21,13 @@ import { CreateStory } from "@/components/CreateStory";
 import { SearchView } from "@/components/SearchView";
 import { Header } from "@/components/Header";
 import { getSocket } from "@/lib/socket";
-import { getBackendUrl } from "@/lib/utils";
+import { getBackendUrl, getUserSession, setUserSession, updateBrowserHistory, handleBrowserBack } from "@/lib/utils";
 import { PostDetailView } from "@/components/PostDetailView";
 import { Notification } from "@/lib/notificationService";
 import { NotificationsPage } from "@/components/NotificationsPage";
 import { useRealTimeMessages } from "@/hooks/use-mobile";
+import { useToast } from "@/components/ui/use-toast";
+
 
 const Index = () => {
   // All hooks must be at the top - no conditional hooks
@@ -34,6 +37,7 @@ const Index = () => {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [storiesRefreshTrigger, setStoriesRefreshTrigger] = useState(0);
+  const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
   const [isInitialized, setIsInitialized] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -43,6 +47,12 @@ const Index = () => {
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
   const [notificationCount, setNotificationCount] = useState(0);
   const [targetUserId, setTargetUserId] = useState<string | null>(null);
+  const [tabHistory, setTabHistory] = useState<string[]>(["home"]);
+
+  // React Router hooks
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { toast } = useToast();
 
   // Use real-time message hook
   const { messageCount, refreshMessageCount } = useRealTimeMessages(
@@ -55,7 +65,7 @@ const Index = () => {
     setIsAuthenticated(true);
     if (email) {
       setUserEmail(email);
-      localStorage.setItem('userEmail', email);
+      setUserSession(email);
     }
     setIsInitialized(true);
   }, []);
@@ -64,8 +74,128 @@ const Index = () => {
     if (newTab !== activeTab) {
       setSelectedProfile(null);
       setActiveTab(newTab);
+      
+      // Update tab history for back button functionality
+      setTabHistory(prev => {
+        const newHistory = [...prev, newTab];
+        // Keep only last 10 tabs to prevent memory issues
+        return newHistory.slice(-10);
+      });
+      
+      // Update URL to match the tab
+      const tabToUrlMap: Record<string, string> = {
+        'home': '/home',
+        'messages': '/messages',
+        'profile': '/profile',
+        'network': '/network',
+        'events': '/events',
+        'competitions': '/competitions',
+        'venues': '/venues',
+        'saved': '/saved',
+        'settings': '/settings',
+        'search': '/search',
+        'reels': '/reels',
+        'notifications': '/notifications'
+      };
+      
+      const newUrl = tabToUrlMap[newTab] || '/home';
+      navigate(newUrl, { replace: false });
     }
+  }, [activeTab, navigate]);
+
+
+
+  // Handle browser back button and navigation
+  useEffect(() => {
+    // Parse URL on initial load to set correct active tab
+    const pathname = location.pathname;
+    const urlTab = pathname.substring(1) || 'home'; // Remove leading slash
+    
+    // Map URL paths to tab names
+    const urlToTabMap: Record<string, string> = {
+      '': 'home',
+      'home': 'home',
+      'feed': 'home',
+      'messages': 'messages',
+      'profile': 'profile',
+      'network': 'network',
+      'events': 'events',
+      'competitions': 'competitions',
+      'venues': 'venues',
+      'saved': 'saved',
+      'settings': 'settings',
+      'search': 'search',
+      'reels': 'reels',
+      'notifications': 'notifications'
+    };
+    
+    const tabFromUrl = urlToTabMap[urlTab] || 'home';
+    
+    // Only update if different from current tab
+    if (tabFromUrl !== activeTab) {
+      setActiveTab(tabFromUrl);
+      setTabHistory(prev => {
+        const newHistory = [...prev, tabFromUrl];
+        return newHistory.slice(-10);
+      });
+    }
+  }, [location.pathname, activeTab]);
+
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      // Get the tab from the URL
+      const pathname = window.location.pathname;
+      const urlTab = pathname.substring(1) || 'home';
+      
+      const urlToTabMap: Record<string, string> = {
+        '': 'home',
+        'home': 'home',
+        'feed': 'home',
+        'messages': 'messages',
+        'profile': 'profile',
+        'network': 'network',
+        'events': 'events',
+        'competitions': 'competitions',
+        'venues': 'venues',
+        'saved': 'saved',
+        'settings': 'settings',
+        'search': 'search',
+        'reels': 'reels',
+        'notifications': 'notifications'
+      };
+      
+      const newTab = urlToTabMap[urlTab] || 'home';
+      
+      if (newTab !== activeTab) {
+        setActiveTab(newTab);
+        setSelectedProfile(null);
+        
+        // Update tab history
+        setTabHistory(prev => {
+          const newHistory = [...prev, newTab];
+          return newHistory.slice(-10);
+        });
+      }
+    };
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      // Optional: Show confirmation dialog when user tries to close tab
+      // event.preventDefault();
+      // event.returnValue = '';
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
   }, [activeTab]);
+
+  // Session timeout management removed as requested
+
+
 
   const refreshUserProfile = useCallback(async () => {
     if (!userEmail || profileLoading) {
@@ -88,6 +218,7 @@ const Index = () => {
         const data = await res.json();
         console.log('refreshUserProfile: success, data:', data);
         setUserProfile(data);
+        setProfileUpdateTrigger(prev => prev + 1); // Trigger re-render of all profile-dependent components
       } else {
         console.error('refreshUserProfile: failed with status:', res.status);
         const errorText = await res.text();
@@ -160,9 +291,25 @@ const Index = () => {
   }, []);
 
   const handleProfileClick = useCallback((profile: any) => {
+    console.log('Profile clicked:', profile);
+    if (!profile) {
+      console.error('No profile provided to handleProfileClick');
+      return;
+    }
+    
     setSelectedProfile(profile);
     setActiveTab('profile');
-  }, []);
+    
+    // Update URL for proper navigation
+    navigate('/profile', { replace: false });
+  }, [navigate]);
+
+  const handleBackFromProfile = useCallback(() => {
+    console.log('Back from profile clicked');
+    setSelectedProfile(null);
+    setActiveTab('home');
+    navigate('/home', { replace: false });
+  }, [navigate]);
 
   const handleNotificationClick = useCallback((notification: Notification) => {
     console.log('Notification clicked:', notification);
@@ -178,24 +325,22 @@ const Index = () => {
     setSelectedNotification(notification);
   }, []);
 
-  const handleLogout = useCallback(() => {
-    setIsAuthenticated(false);
-    setUserEmail(null);
-    setUserProfile(null);
-    localStorage.removeItem('userEmail');
-    setActiveTab('home');
-  }, []);
+
 
   // All useEffect hooks
   useEffect(() => {
     console.log('Index: useEffect[1] - checking saved email');
-    const savedEmail = localStorage.getItem('userEmail');
-    console.log('Index: saved email found:', savedEmail);
+    const { email, sessionId } = getUserSession();
+    console.log('Index: saved email found:', email, 'sessionId:', sessionId);
     
-    if (savedEmail) {
+    if (email && sessionId) {
       console.log('Index: setting authenticated and email');
       setIsAuthenticated(true);
-      setUserEmail(savedEmail);
+      setUserEmail(email);
+    } else {
+      // Clear any stale data
+      sessionStorage.removeItem('userEmail');
+      sessionStorage.removeItem('sessionId');
     }
     setIsInitialized(true);
     console.log('Index: initialization complete');
@@ -284,6 +429,29 @@ const Index = () => {
     refreshMessageCount();
   }, [refreshMessageCount]);
 
+  const handleLogout = useCallback(() => {
+    // Clear all authentication state
+    setIsAuthenticated(false);
+    setUserEmail(null);
+    setUserProfile(null);
+    setActiveTab('home');
+    setTabHistory(['home']);
+    
+    // Clear session storage
+    sessionStorage.removeItem('userEmail');
+    sessionStorage.removeItem('sessionId');
+    
+    // Clear any other state that should be reset
+    setSelectedProfile(null);
+    setViewingPost(null);
+    setSelectedNotification(null);
+    setTargetUserId(null);
+    setNotifications([]);
+    setProfiles({});
+    setUnreadCount(0);
+    setNotificationCount(0);
+  }, []);
+
   // Add a more frequent polling for message count when user is active
   useEffect(() => {
     fetchNotificationCount();
@@ -308,8 +476,42 @@ const Index = () => {
     };
   }, [fetchNotificationCount, refreshMessageCount, activeTab]);
 
-  // Memoized main content
+  // Listen for profile image updates globally
+  useEffect(() => {
+    let refreshTimeout: NodeJS.Timeout | null = null;
+    
+    const handleProfileImageUpdate = (event: CustomEvent) => {
+      if (event.detail.userId === userProfile?.id) {
+        console.log('Profile image updated, refreshing user profile...');
+        
+        // Clear any existing timeout to prevent multiple rapid refreshes
+        if (refreshTimeout) {
+          clearTimeout(refreshTimeout);
+        }
+        
+        // Debounce the profile refresh
+        refreshTimeout = setTimeout(() => {
+          refreshUserProfile();
+        }, 500);
+      }
+    };
+
+    window.addEventListener('profileImageUpdated', handleProfileImageUpdate as EventListener);
+    
+    return () => {
+      window.removeEventListener('profileImageUpdated', handleProfileImageUpdate as EventListener);
+      if (refreshTimeout) {
+        clearTimeout(refreshTimeout);
+      }
+    };
+  }, [userProfile?.id, refreshUserProfile]);
+
+  // Main content rendering
   const mainContent = useMemo(() => {
+    console.log('Index: Rendering main content for activeTab:', activeTab);
+    console.log('Index: selectedProfile:', selectedProfile);
+    console.log('Index: effectiveUser:', effectiveUser);
+    
     switch (activeTab) {
       case "home":
         return (
@@ -342,6 +544,7 @@ const Index = () => {
             userId={effectiveUser?.id}
             onBack={() => setActiveTab("home")}
             onNotificationClick={handleNotificationClick}
+            onProfileClick={handleProfileClick}
           />
         );
       case "messages":
@@ -355,13 +558,15 @@ const Index = () => {
           />
         );
       case "profile":
+        console.log('Index: Rendering ProfileView');
         return (
           <ProfileView
             profile={selectedProfile || effectiveUser}
             loggedInUserId={effectiveUser?.id}
+            refreshUserProfile={refreshUserProfile}
             onSaveChange={handleSaveChange}
             onProfileClick={handleProfileClick}
-            onBack={() => setActiveTab("home")}
+            onBack={handleBackFromProfile}
             onNavigateToMessages={handleNavigateToMessages}
           />
         );
@@ -417,6 +622,7 @@ const Index = () => {
     userProfile,
     selectedProfile,
     storiesRefreshTrigger,
+    profileUpdateTrigger,
     viewingPost,
     handleProfileClick,
     handleNotificationClick,
@@ -428,6 +634,7 @@ const Index = () => {
     targetUserId,
     handleClearTargetUser,
     handleRefreshConversations,
+    handleBackFromProfile,
   ]);
 
   // Conditional rendering AFTER all hooks
@@ -452,6 +659,8 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
+
+      
       {/* Mobile Header */}
       <div className="md:hidden">
         <MobileHeader
@@ -487,6 +696,7 @@ const Index = () => {
               activeTab={activeTab}
               setActiveTab={handleTabChange}
               userProfile={effectiveUser}
+              setIsAuthenticated={handleLogout}
             />
           </div>
         </div>
@@ -510,7 +720,7 @@ const Index = () => {
       <MobileFooter
         activeTab={activeTab}
         setActiveTab={handleTabChange}
-        setIsAuthenticated={setIsAuthenticated}
+        setIsAuthenticated={handleLogout}
         userProfile={effectiveUser}
         notificationCount={notificationCount}
         messageCount={messageCount}

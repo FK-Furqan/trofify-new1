@@ -198,7 +198,7 @@ export const PostActions = ({
   const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
 
   return (
-    <div className="flex items-center w-full py-2 bg-card z-10 min-h-[48px]">
+    <div className="flex items-center w-full py-2 bg-card z-10 min-h-[48px] pr-4">
       <div className="flex space-x-2 flex-shrink-0 ml-4">
         <Button
           variant="ghost"

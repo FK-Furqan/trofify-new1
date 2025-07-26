@@ -39,6 +39,22 @@ CREATE INDEX IF NOT EXISTS idx_stories_user_id ON stories(user_id);
 CREATE INDEX IF NOT EXISTS idx_stories_created_at ON stories(created_at);
 
 -- ================================
+-- 2.1. STORY VIEWS TABLE
+-- ================================
+CREATE TABLE IF NOT EXISTS story_views (
+  id BIGSERIAL PRIMARY KEY,
+  story_id BIGINT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+  viewer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  viewed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(story_id, viewer_id)
+);
+
+-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_story_views_story_id ON story_views(story_id);
+CREATE INDEX IF NOT EXISTS idx_story_views_viewer_id ON story_views(viewer_id);
+CREATE INDEX IF NOT EXISTS idx_story_views_viewed_at ON story_views(viewed_at);
+
+-- ================================
 -- 3. POSTS TABLE
 -- ================================
 CREATE TABLE IF NOT EXISTS posts (

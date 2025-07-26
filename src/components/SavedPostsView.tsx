@@ -78,23 +78,39 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
     return `${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`;
   };
 
-  const handleProfileClick = (post: any) => {
+  const handleProfileClick = async (post: any) => {
     if (onProfileClick) {
-      onProfileClick({
-        id: post.user_id,
-        name: post.author_name,
-        username: `@${post.author_name?.toLowerCase().replace(/\s+/g, '')}`,
-        avatar: post.avatar || "/placeholder.svg",
-        sport: post.category,
-        verified: false,
-        bio: `Professional ${post.category || post.user_type} User`,
-        coverImage: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1200&h=400&fit=crop",
-        location: "New York, USA",
-        joinDate: "March 2022",
-        followers: Math.floor(Math.random() * 50000) + 10000,
-        following: Math.floor(Math.random() * 1000) + 100,
-        posts: Math.floor(Math.random() * 200) + 50,
-      });
+      try {
+        // Fetch complete user profile data from backend
+        const response = await fetch(`${getBackendUrl()}/api/users/${post.user_id}`);
+        if (response.ok) {
+          const completeProfile = await response.json();
+          console.log('SavedPostsView: Complete profile fetched:', completeProfile);
+          onProfileClick(completeProfile);
+        } else {
+          console.error('Failed to fetch complete profile, using fallback');
+          // Fallback to basic profile data if fetch fails
+          onProfileClick({
+            id: post.user_id,
+            email: post.email,
+            display_name: post.author_name,
+            avatar: post.avatar || "/placeholder.svg",
+            user_type: post.category || post.user_type || "athlete",
+            sport: post.category || post.user_type || "athlete",
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching complete profile:', error);
+        // Fallback to basic profile data if fetch fails
+        onProfileClick({
+          id: post.user_id,
+          email: post.email,
+          display_name: post.author_name,
+          avatar: post.avatar || "/placeholder.svg",
+          user_type: post.category || post.user_type || "athlete",
+          sport: post.category || post.user_type || "athlete",
+        });
+      }
     }
   };
 

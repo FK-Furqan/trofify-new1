@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Search, ArrowLeft, User } from "lucide-react";
 import { messagingService, Conversation } from "@/lib/messagingService";
 import { UniversalLoader } from "@/components/ui/universal-loader";
+import { getBackendUrl } from "@/lib/utils";
 
 interface User {
   id: string;
@@ -38,7 +39,7 @@ export const NewMessageView = ({
     try {
       // For now, we'll use a simple approach - you can enhance this later
       // This would typically call an API to search users
-      const response = await fetch(`http://localhost:5000/api/users/search?q=${encodeURIComponent(query)}&current_user_id=${currentUserId}`);
+      const response = await fetch(`${getBackendUrl()}/api/users/search?q=${encodeURIComponent(query)}&current_user_id=${currentUserId}`);
       if (response.ok) {
         const data = await response.json();
         setUsers(data);
@@ -122,7 +123,7 @@ export const NewMessageView = ({
       </div>
 
       {/* Users List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto scrollbar-hide">
         {searching ? (
           <div className="p-4">
             <UniversalLoader count={5} />

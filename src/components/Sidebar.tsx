@@ -1,17 +1,50 @@
 
-import { Home, Users, Calendar, Trophy, MapPin, Settings, Bookmark } from "lucide-react";
+import { Home, Users, Calendar, Trophy, MapPin, Settings, Bookmark, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useEffect, useState } from "react";
+import { getBackendUrl, getAvatarUrlWithCacheBust, clearUserSession } from "@/lib/utils";
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   userProfile?: any;
+  setIsAuthenticated?: (auth: boolean) => void;
 }
 
-export const Sidebar = ({ activeTab, setActiveTab, userProfile }: SidebarProps) => {
+export const Sidebar = ({ activeTab, setActiveTab, userProfile, setIsAuthenticated }: SidebarProps) => {
+  const [profileImageKey, setProfileImageKey] = useState(0);
+  const [updateTimeout, setUpdateTimeout] = useState<NodeJS.Timeout | null>(null);
+
+  // Listen for profile image updates
+  useEffect(() => {
+    const handleProfileImageUpdate = (event: CustomEvent) => {
+      if (event.detail.userId === userProfile?.id) {
+        // Clear any existing timeout
+        if (updateTimeout) {
+          clearTimeout(updateTimeout);
+        }
+        
+        // Debounce the update to prevent flickering
+        const newTimeout = setTimeout(() => {
+          setProfileImageKey(prev => prev + 1);
+        }, 100);
+        
+        setUpdateTimeout(newTimeout);
+      }
+    };
+
+    window.addEventListener('profileImageUpdated', handleProfileImageUpdate as EventListener);
+    
+    return () => {
+      window.removeEventListener('profileImageUpdated', handleProfileImageUpdate as EventListener);
+      if (updateTimeout) {
+        clearTimeout(updateTimeout);
+      }
+    };
+  }, [userProfile?.id, updateTimeout]);
+
   const menuItems = [
     { icon: Home, label: "Home", id: "home", active: activeTab === "home" },
     { icon: Users, label: "My Network", id: "network", count: 12 },
@@ -22,13 +55,10 @@ export const Sidebar = ({ activeTab, setActiveTab, userProfile }: SidebarProps) 
     { icon: Settings, label: "Settings", id: "settings" },
   ];
 
+
+
   // Remove fallback dummy profile
   const profile = userProfile;
-  const getAvatarUrl = (avatar?: string) => {
-    if (!avatar) return "/placeholder.svg";
-    if (avatar.startsWith("http")) return avatar;
-    return `https://trofify-media.s3.amazonaws.com/${avatar}`;
-  };
 
   // State for sport name
   const [sport, setSport] = useState(profile?.sport || "");
@@ -63,21 +93,45 @@ export const Sidebar = ({ activeTab, setActiveTab, userProfile }: SidebarProps) 
     <div className="p-4 space-y-6">
       {/* User Profile */}
       <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-        <div className="flex flex-col items-center md:flex-row md:items-center md:space-x-3">
+        <div className="flex flex-col items-center space-y-3">
           {profile && profile.avatar ? (
-            <Avatar className="h-12 w-12">
-              <AvatarImage src={getAvatarUrl(profile.avatar)} onError={e => { e.currentTarget.src = "/placeholder.svg"; }} />
-              <AvatarFallback>{(profile.display_name || profile.email || "U")[0]}</AvatarFallback>
+            <Avatar className="h-16 w-16">
+              <AvatarImage 
+                key={`sidebar-avatar-${profileImageKey}`}
+                src={getAvatarUrlWithCacheBust(profile.avatar)} 
+                onError={e => { e.currentTarget.src = "/placeholder.svg"; }} 
+              />
+              <AvatarFallback className="text-lg">{(profile.display_name || profile.email || "U")[0]}</AvatarFallback>
             </Avatar>
           ) : null}
-          <div className="mt-2 md:mt-0 text-center md:text-left">
-            <h3 className="font-semibold text-foreground">{profile?.display_name || profile?.email}</h3>
+          
+          {/* User Name and Type */}
+          <div className="text-center space-y-2">
+            <h3 className="font-semibold text-foreground text-lg">
+              {profile?.display_name || profile?.name || profile?.email}
+            </h3>
+            
+            {/* User Type Badge */}
+            {profile?.user_type && (
+              <Badge 
+                variant="secondary" 
+                className="text-xs font-medium px-3 py-1 bg-[#0e9591] text-white"
+              >
+                {profile.user_type.charAt(0).toUpperCase() + profile.user_type.slice(1)}
+              </Badge>
+            )}
+            
+            {/* Sport Badge */}
             {sport && (
-              <Badge variant="secondary" className="text-xs mt-1 bg-[#0e9591] text-white">{sport}</Badge>
+              <Badge variant="secondary" className="text-xs mt-1 bg-[#0e9591] text-white px-3 py-1">
+                {sport}
+              </Badge>
             )}
           </div>
         </div>
-        <div className="mt-3 flex justify-between text-sm">
+        
+        {/* Stats */}
+        <div className="mt-4 flex justify-between text-sm border-t border-border pt-3">
           <div className="text-center">
             <div className="font-semibold text-foreground">1.2K</div>
             <div className="text-muted-foreground">Followers</div>
@@ -109,12 +163,29 @@ export const Sidebar = ({ activeTab, setActiveTab, userProfile }: SidebarProps) 
                 <item.icon className="h-4 w-4 mr-3" />
                 {item.label}
                 {item.count && (
-                  <Badge className="ml-auto bg-blue-100 text-blue-800 text-xs dark:bg-blue-900 dark:text-blue-200">
+                  <Badge className="ml-auto bg-[#0e9591]/20 text-[#0e9591] text-xs">
                     {item.count}
                   </Badge>
                 )}
               </Button>
             ))}
+            
+            {/* Logout Button */}
+            <Button
+              variant="ghost"
+              className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
+              size="sm"
+              onClick={() => {
+                if (setIsAuthenticated) {
+                  setIsAuthenticated(false);
+                }
+              }}
+            >
+              <LogOut className="h-4 w-4 mr-3" />
+              Logout
+            </Button>
+            
+
           </div>
         </div>
       </div>
