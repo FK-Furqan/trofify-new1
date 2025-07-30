@@ -238,12 +238,9 @@ const StoriesBarComponent = ({ userProfile, onAddStoryClick, refreshTrigger, onP
   const handleStoryClick = useCallback((userStoryIndex) => {
     // Debug: Log the clicked story data
     const clickedStory = displayStories[userStoryIndex];
-    console.log('Clicked story:', clickedStory);
-    console.log('Selected index:', userStoryIndex);
     
     // Find the actual index in the stories array
     const actualStoryIndex = stories.findIndex(story => story.userId === clickedStory.userId);
-    console.log('Actual story index:', actualStoryIndex);
     
     if (actualStoryIndex === -1) {
       console.error('Story not found in stories array:', clickedStory);
@@ -306,14 +303,6 @@ const StoriesBarComponent = ({ userProfile, onAddStoryClick, refreshTrigger, onP
     // Only consider stories as viewed if they're in the viewedStories set (viewed for 1+ second)
     const allViewed = userStory.stories.every(story => viewedStories.has(story.id));
     
-    // Debug logging
-    console.log(`Checking viewed status for user ${userStory.user}:`, {
-      totalStories: userStory.stories.length,
-      viewedStories: Array.from(viewedStories),
-      userStoryIds: userStory.stories.map(s => s.id),
-      allViewed: allViewed
-    });
-    
     return allViewed;
   }, [viewedStories]);
 
@@ -329,13 +318,7 @@ const StoriesBarComponent = ({ userProfile, onAddStoryClick, refreshTrigger, onP
     return status;
   }, [displayStories, areAllStoriesViewed]);
 
-  // Debug logging for viewed stories state
-  useEffect(() => {
-    console.log('Viewed stories state updated:', {
-      viewedStoriesCount: viewedStories.size,
-      viewedStoryIds: Array.from(viewedStories)
-    });
-  }, [viewedStories]);
+
 
   // Helper function to get proper media URL
   const getMediaUrl = (mediaUrl: string) => {
@@ -526,7 +509,7 @@ const StoriesBarComponent = ({ userProfile, onAddStoryClick, refreshTrigger, onP
       </div>
 
       {/* Separator line after stories */}
-      <div className="border-b-2 border-border"></div>
+              <div className="border-b-4 border-border"></div>
 
       {/* Story Viewer Modal */}
         <StoryViewer

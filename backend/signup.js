@@ -64,20 +64,12 @@ router.post('/', async (req, res) => {
         location
       });
     } else if (user_type === 'venue') {
-      const { ownerName, venueName, venueType, address, city, state, zipCode, website, facilities, capacity, description, phoneNumber } = profileData;
+      const { ownerName, venueName, venueType, phoneNumber } = profileData;
       await supabase.from('venues').insert({
         user_id,
         owner_name: ownerName,
         venue_name: venueName,
         venue_type: venueType,
-        address,
-        city,
-        state,
-        zip_code: zipCode,
-        website,
-        facilities: (facilities || []).join(','),
-        capacity,
-        description,
         phone_number: phoneNumber
       });
     } else if (user_type === 'sports_brand') {
@@ -96,6 +88,23 @@ router.post('/', async (req, res) => {
         product_categories: (productCategories || []).join(','),
         target_markets: (targetMarkets || []).join(','),
         description
+      });
+    } else if (user_type === 'media_creator') {
+      const { fullName, mediaType, phoneNumber } = profileData;
+      await supabase.from('media_creators').insert({
+        user_id,
+        full_name: fullName,
+        media_type: mediaType,
+        phone_number: phoneNumber
+      });
+    } else if (user_type === 'organization_institute') {
+      const { contactName, organizationName, organizationType, phoneNumber } = profileData;
+      await supabase.from('organizations_institutes').insert({
+        user_id,
+        contact_name: contactName,
+        organization_name: organizationName,
+        organization_type: organizationType,
+        phone_number: phoneNumber
       });
     }
     res.json({ success: true });
@@ -181,6 +190,120 @@ router.post('/profile', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// Update profile endpoint
+router.post('/update-profile', async (req, res) => {
+  const { userType, profileData } = req.body;
+  const { email } = profileData;
+  
+  try {
+    // Get user ID from email
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+    
+    if (userError || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user_id = user.id;
+
+    // Update base user info
+    const { error: updateUserError } = await supabase
+      .from('users')
+      .update({
+        display_name: profileData.display_name,
+        phone_number: profileData.phone_number
+      })
+      .eq('id', user_id);
+
+    if (updateUserError) {
+      return res.status(500).json({ error: 'Failed to update user info' });
+    }
+
+    // Update type-specific profile data
+    let updateError = null;
+    
+    switch (userType) {
+      case 'venue':
+        const { error: venueError } = await supabase
+          .from('venues')
+          .update({
+            owner_name: profileData.owner_name,
+            venue_name: profileData.venue_name,
+            venue_type: profileData.venue_type,
+            address: profileData.address,
+            city: profileData.city,
+            state: profileData.state,
+            zip_code: profileData.zip_code,
+            website: profileData.website,
+            capacity: profileData.capacity,
+            facilities: profileData.facilities,
+            description: profileData.description,
+            phone_number: profileData.phone_number
+          })
+          .eq('user_id', user_id);
+        updateError = venueError;
+        break;
+
+      case 'media_creator':
+        const { error: mediaError } = await supabase
+          .from('media_creators')
+          .update({
+            full_name: profileData.full_name,
+            media_type: profileData.media_type,
+            specialization: profileData.specialization,
+            experience: profileData.experience,
+            portfolio_url: profileData.portfolio_url,
+            social_media_handles: profileData.social_media_handles,
+            equipment: profileData.equipment,
+            location: profileData.location,
+            description: profileData.description,
+            phone_number: profileData.phone_number
+          })
+          .eq('user_id', user_id);
+        updateError = mediaError;
+        break;
+
+      case 'organization_institute':
+        const { error: orgError } = await supabase
+          .from('organizations_institutes')
+          .update({
+            contact_name: profileData.contact_name,
+            organization_name: profileData.organization_name,
+            organization_type: profileData.organization_type,
+            website: profileData.website,
+            address: profileData.address,
+            city: profileData.city,
+            state: profileData.state,
+            zip_code: profileData.zip_code,
+            founded_year: profileData.founded_year,
+            mission_statement: profileData.mission_statement,
+            programs_services: profileData.programs_services,
+            target_audience: profileData.target_audience,
+            description: profileData.description,
+            phone_number: profileData.phone_number
+          })
+          .eq('user_id', user_id);
+        updateError = orgError;
+        break;
+
+      default:
+        return res.status(400).json({ error: 'Unsupported user type' });
+    }
+
+    if (updateError) {
+      return res.status(500).json({ error: 'Failed to update profile data' });
+    }
+
+    res.json({ success: true, message: 'Profile updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Profile update failed' });
   }
 });
 

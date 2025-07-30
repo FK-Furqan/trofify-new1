@@ -12,7 +12,7 @@ import { ProfileView } from "@/components/ProfileView";
 import { NetworkView } from "@/components/NetworkView";
 import { EventsView } from "@/components/EventsView";
 import { CompetitionsView } from "@/components/CompetitionsView";
-import { VenuesView } from "@/components/VenuesView";
+
 import { SavedPostsView } from "@/components/SavedPostsView";
 import { SettingsView } from "@/components/SettingsView";
 import { AuthSystem } from "@/components/AuthSystem";
@@ -48,6 +48,8 @@ const Index = () => {
   const [notificationCount, setNotificationCount] = useState(0);
   const [targetUserId, setTargetUserId] = useState<string | null>(null);
   const [tabHistory, setTabHistory] = useState<string[]>(["home"]);
+  const [previousTab, setPreviousTab] = useState<string>("home");
+  const [messagesViewState, setMessagesViewState] = useState<'conversations' | 'conversation' | 'new-message'>('conversations');
 
   // React Router hooks
   const navigate = useNavigate();
@@ -72,7 +74,16 @@ const Index = () => {
 
   const handleTabChange = useCallback((newTab: string) => {
     if (newTab !== activeTab) {
-      setSelectedProfile(null);
+      // Store the current tab as previous tab before changing
+      if (activeTab !== 'create-post' && activeTab !== 'create-story') {
+        setPreviousTab(activeTab);
+      }
+      
+      // Don't clear selectedProfile for modal tabs
+      if (newTab !== 'create-post' && newTab !== 'create-story') {
+        setSelectedProfile(null);
+      }
+      
       setActiveTab(newTab);
       
       // Update tab history for back button functionality
@@ -82,7 +93,7 @@ const Index = () => {
         return newHistory.slice(-10);
       });
       
-      // Update URL to match the tab
+      // Update URL to match the tab (but not for modal tabs)
       const tabToUrlMap: Record<string, string> = {
         'home': '/home',
         'messages': '/messages',
@@ -90,7 +101,7 @@ const Index = () => {
         'network': '/network',
         'events': '/events',
         'competitions': '/competitions',
-        'venues': '/venues',
+
         'saved': '/saved',
         'settings': '/settings',
         'search': '/search',
@@ -98,8 +109,11 @@ const Index = () => {
         'notifications': '/notifications'
       };
       
-      const newUrl = tabToUrlMap[newTab] || '/home';
-      navigate(newUrl, { replace: false });
+      // Only navigate for non-modal tabs
+      if (newTab !== 'create-post' && newTab !== 'create-story') {
+        const newUrl = tabToUrlMap[newTab] || '/home';
+        navigate(newUrl, { replace: false });
+      }
     }
   }, [activeTab, navigate]);
 
@@ -107,6 +121,11 @@ const Index = () => {
 
   // Handle browser back button and navigation
   useEffect(() => {
+    // Don't interfere with modal tabs or post-detail
+    if (activeTab === 'create-post' || activeTab === 'create-story' || activeTab === 'post-detail') {
+      return;
+    }
+    
     // Parse URL on initial load to set correct active tab
     const pathname = location.pathname;
     const urlTab = pathname.substring(1) || 'home'; // Remove leading slash
@@ -121,7 +140,7 @@ const Index = () => {
       'network': 'network',
       'events': 'events',
       'competitions': 'competitions',
-      'venues': 'venues',
+      
       'saved': 'saved',
       'settings': 'settings',
       'search': 'search',
@@ -131,7 +150,7 @@ const Index = () => {
     
     const tabFromUrl = urlToTabMap[urlTab] || 'home';
     
-    // Only update if different from current tab
+    // Only update if different from current tab and not in a modal state
     if (tabFromUrl !== activeTab) {
       setActiveTab(tabFromUrl);
       setTabHistory(prev => {
@@ -143,6 +162,11 @@ const Index = () => {
 
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
+      // Don't interfere with modal tabs or post-detail
+      if (activeTab === 'create-post' || activeTab === 'create-story' || activeTab === 'post-detail') {
+        return;
+      }
+      
       // Get the tab from the URL
       const pathname = window.location.pathname;
       const urlTab = pathname.substring(1) || 'home';
@@ -156,7 +180,7 @@ const Index = () => {
         'network': 'network',
         'events': 'events',
         'competitions': 'competitions',
-        'venues': 'venues',
+
         'saved': 'saved',
         'settings': 'settings',
         'search': 'search',
@@ -199,11 +223,9 @@ const Index = () => {
 
   const refreshUserProfile = useCallback(async () => {
     if (!userEmail || profileLoading) {
-      console.log('refreshUserProfile: skipping because', { userEmail, profileLoading });
       return;
     }
     
-    console.log('refreshUserProfile: starting for email:', userEmail);
     setProfileLoading(true);
     try {
       const res = await fetch(`${getBackendUrl()}/signup/profile`, {
@@ -212,11 +234,8 @@ const Index = () => {
         body: JSON.stringify({ email: userEmail }),
       });
       
-      console.log('refreshUserProfile: response status:', res.status);
-      
       if (res.ok) {
         const data = await res.json();
-        console.log('refreshUserProfile: success, data:', data);
         setUserProfile(data);
         setProfileUpdateTrigger(prev => prev + 1); // Trigger re-render of all profile-dependent components
       } else {
@@ -232,7 +251,6 @@ const Index = () => {
           user_type: 'athlete',
           avatar: null
         };
-        console.log('refreshUserProfile: using fallback profile:', fallbackProfile);
         setUserProfile(fallbackProfile);
       }
     } catch (error) {
@@ -246,7 +264,6 @@ const Index = () => {
         user_type: 'athlete',
         avatar: null
       };
-      console.log('refreshUserProfile: using fallback profile after error:', fallbackProfile);
       setUserProfile(fallbackProfile);
     } finally {
       setProfileLoading(false);
@@ -255,24 +272,24 @@ const Index = () => {
 
   const handleStoryCreated = useCallback(() => {
     setStoriesRefreshTrigger(prev => prev + 1);
-    setActiveTab('home');
-  }, []);
+    setActiveTab(previousTab);
+  }, [previousTab]);
 
   const handlePostCreated = useCallback(() => {
-    setActiveTab('home');
-  }, []);
+    setActiveTab(previousTab);
+  }, [previousTab]);
 
   const handleCreateStoryClose = useCallback((open: boolean) => {
     if (!open) {
-      setActiveTab('home');
+      setActiveTab(previousTab);
     }
-  }, []);
+  }, [previousTab]);
 
   const handleCreatePostClose = useCallback((open: boolean) => {
     if (!open) {
-      setActiveTab('home');
+      setActiveTab(previousTab);
     }
-  }, []);
+  }, [previousTab]);
 
   const fetchUnreadCount = useCallback(async () => {
     if (userProfile?.id) {
@@ -291,9 +308,7 @@ const Index = () => {
   }, []);
 
   const handleProfileClick = useCallback((profile: any) => {
-    console.log('Profile clicked:', profile);
     if (!profile) {
-      console.error('No profile provided to handleProfileClick');
       return;
     }
     
@@ -305,20 +320,17 @@ const Index = () => {
   }, [navigate]);
 
   const handleBackFromProfile = useCallback(() => {
-    console.log('Back from profile clicked');
     setSelectedProfile(null);
     setActiveTab('home');
     navigate('/home', { replace: false });
   }, [navigate]);
 
   const handleNotificationClick = useCallback((notification: Notification) => {
-    console.log('Notification clicked:', notification);
-    
     // If notification has a post, open the post detail view
     if (notification.post) {
-      console.log('Setting viewing post:', notification.post);
       setViewingPost(notification.post);
       setActiveTab("post-detail");
+      // Don't update URL for post-detail as it's a modal state
     } else {
       console.error('Notification does not have post data:', notification);
     }
@@ -329,12 +341,9 @@ const Index = () => {
 
   // All useEffect hooks
   useEffect(() => {
-    console.log('Index: useEffect[1] - checking saved email');
     const { email, sessionId } = getUserSession();
-    console.log('Index: saved email found:', email, 'sessionId:', sessionId);
     
     if (email && sessionId) {
-      console.log('Index: setting authenticated and email');
       setIsAuthenticated(true);
       setUserEmail(email);
     } else {
@@ -343,21 +352,11 @@ const Index = () => {
       sessionStorage.removeItem('sessionId');
     }
     setIsInitialized(true);
-    console.log('Index: initialization complete');
   }, []);
 
   useEffect(() => {
-    console.log('Index: useEffect[2] - profile loading check', { 
-      isAuthenticated, 
-      userEmail, 
-      hasUserProfile: !!userProfile 
-    });
-    
     if (isAuthenticated && userEmail && !userProfile) {
-      console.log('Index: conditions met, calling refreshUserProfile');
       refreshUserProfile();
-    } else {
-      console.log('Index: conditions not met for refreshUserProfile');
     }
   }, [isAuthenticated, userEmail, userProfile, refreshUserProfile]);
 
@@ -379,7 +378,6 @@ const Index = () => {
   // Computed user object with fallback
   const effectiveUser = useMemo(() => {
     if (userProfile) {
-      console.log('Index: using real userProfile:', userProfile);
       return userProfile;
     }
     
@@ -391,11 +389,9 @@ const Index = () => {
         user_type: 'athlete',
         avatar: null
       };
-      console.log('Index: using fallback user:', fallbackUser);
       return fallbackUser;
     }
     
-    console.log('Index: no user available');
     return null;
   }, [userProfile, isAuthenticated, userEmail]);
 
@@ -418,7 +414,16 @@ const Index = () => {
       setTargetUserId(userId);
     }
     setActiveTab('messages');
-  }, []);
+    // Update URL for messages navigation
+    navigate('/messages', { replace: false });
+  }, [navigate]);
+
+  const handleMessageUser = useCallback((userId: string) => {
+    setTargetUserId(userId);
+    setActiveTab('messages');
+    // Update URL for messages navigation
+    navigate('/messages', { replace: false });
+  }, [navigate]);
 
   const handleClearTargetUser = useCallback(() => {
     setTargetUserId(null);
@@ -428,6 +433,10 @@ const Index = () => {
     // Trigger immediate refresh of message count and conversations
     refreshMessageCount();
   }, [refreshMessageCount]);
+
+  const handleMessagesViewChange = useCallback((view: 'conversations' | 'conversation' | 'new-message') => {
+    setMessagesViewState(view);
+  }, []);
 
   const handleLogout = useCallback(() => {
     // Clear all authentication state
@@ -454,6 +463,8 @@ const Index = () => {
 
   // Add a more frequent polling for message count when user is active
   useEffect(() => {
+    if (!effectiveUser?.id) return;
+    
     fetchNotificationCount();
     refreshMessageCount();
     
@@ -474,25 +485,25 @@ const Index = () => {
       clearInterval(interval);
       clearInterval(messageInterval);
     };
-  }, [fetchNotificationCount, refreshMessageCount, activeTab]);
+  }, [fetchNotificationCount, refreshMessageCount, activeTab, effectiveUser?.id]);
 
   // Listen for profile image updates globally
   useEffect(() => {
+    if (!userProfile?.id) return;
+    
     let refreshTimeout: NodeJS.Timeout | null = null;
     
     const handleProfileImageUpdate = (event: CustomEvent) => {
-      if (event.detail.userId === userProfile?.id) {
-        console.log('Profile image updated, refreshing user profile...');
-        
+      if (event.detail.userId === userProfile.id) {
         // Clear any existing timeout to prevent multiple rapid refreshes
         if (refreshTimeout) {
           clearTimeout(refreshTimeout);
         }
         
-        // Debounce the profile refresh
+        // Debounce the profile refresh (reduced delay for faster updates)
         refreshTimeout = setTimeout(() => {
           refreshUserProfile();
-        }, 500);
+        }, 200);
       }
     };
 
@@ -508,9 +519,10 @@ const Index = () => {
 
   // Main content rendering
   const mainContent = useMemo(() => {
-    console.log('Index: Rendering main content for activeTab:', activeTab);
-    console.log('Index: selectedProfile:', selectedProfile);
-    console.log('Index: effectiveUser:', effectiveUser);
+    // Don't render main content when modals are open
+    if (activeTab === 'create-post' || activeTab === 'create-story') {
+      return null;
+    }
     
     switch (activeTab) {
       case "home":
@@ -537,7 +549,7 @@ const Index = () => {
           </div>
         );
       case "reels":
-        return <ReelsView onProfileClick={handleProfileClick} />;
+        return <ReelsView currentUserId={effectiveUser?.id} onProfileClick={handleProfileClick} />;
       case "notifications":
         return (
           <NotificationsPage
@@ -555,10 +567,10 @@ const Index = () => {
             targetUserId={targetUserId}
             onClearTargetUser={handleClearTargetUser}
             onRefreshConversations={handleRefreshConversations}
+            onViewChange={handleMessagesViewChange}
           />
         );
       case "profile":
-        console.log('Index: Rendering ProfileView');
         return (
           <ProfileView
             profile={selectedProfile || effectiveUser}
@@ -568,16 +580,17 @@ const Index = () => {
             onProfileClick={handleProfileClick}
             onBack={handleBackFromProfile}
             onNavigateToMessages={handleNavigateToMessages}
+            onMessageUser={handleMessageUser}
+            onAddStoryClick={() => setActiveTab("create-story")}
           />
         );
       case "network":
-        return <NetworkView onProfileClick={handleProfileClick} />;
+        return <NetworkView onProfileClick={handleProfileClick} currentUserId={effectiveUser?.id} />;
       case "events":
         return <EventsView />;
       case "competitions":
         return <CompetitionsView />;
-      case "venues":
-        return <VenuesView />;
+
       case "saved":
         return <SavedPostsView onProfileClick={handleProfileClick} userId={effectiveUser?.id} />;
       case "settings":
@@ -619,22 +632,21 @@ const Index = () => {
     }
   }, [
     activeTab,
-    userProfile,
     selectedProfile,
     storiesRefreshTrigger,
-    profileUpdateTrigger,
     viewingPost,
+    effectiveUser?.id,
+    targetUserId,
+    previousTab,
     handleProfileClick,
     handleNotificationClick,
     handleSaveChange,
-    notifications,
-    profiles,
-    effectiveUser,
-    fetchNotificationCount,
-    targetUserId,
+    handleBackFromProfile,
+    handleNavigateToMessages,
+    handleMessageUser,
     handleClearTargetUser,
     handleRefreshConversations,
-    handleBackFromProfile,
+    handleMessagesViewChange,
   ]);
 
   // Conditional rendering AFTER all hooks
@@ -711,7 +723,11 @@ const Index = () => {
         {/* Right Panel - Desktop Only */}
         <div className="hidden xl:block w-80 fixed right-0 top-16 h-[calc(100vh-4rem)] z-10">
           <div className="h-full overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
-            <RightPanel onProfileClick={handleProfileClick} />
+                            <RightPanel 
+                  onProfileClick={handleProfileClick} 
+                  onMessageClick={handleMessageUser}
+                  currentUserId={effectiveUser?.id} 
+                />
           </div>
         </div>
       </div>
@@ -725,26 +741,28 @@ const Index = () => {
         notificationCount={notificationCount}
         messageCount={messageCount}
         onNotificationClick={handleNotificationClick}
+        hidden={activeTab === 'messages' && messagesViewState === 'conversation'}
       />
 
-      {/* Modals */}
-      {activeTab === 'create-post' && (
-        <CreatePost
-          user={effectiveUser}
-          onPostCreated={handlePostCreated}
-          open={true}
-          onOpenChange={handleCreatePostClose}
-        />
+      {/* Background overlay when modals are open */}
+      {(activeTab === 'create-post' || activeTab === 'create-story') && (
+        <div className="fixed inset-0 bg-black/50 z-40" />
       )}
       
-      {activeTab === 'create-story' && (
-        <CreateStory
-          user={effectiveUser}
-          onStoryCreated={handleStoryCreated}
-          open={true}
-          onOpenChange={handleCreateStoryClose}
-        />
-      )}
+      {/* Modals - Always render but control visibility with open prop */}
+      <CreatePost
+        user={effectiveUser}
+        onPostCreated={handlePostCreated}
+        open={activeTab === 'create-post'}
+        onOpenChange={handleCreatePostClose}
+      />
+      
+      <CreateStory
+        user={effectiveUser}
+        onStoryCreated={handleStoryCreated}
+        open={activeTab === 'create-story'}
+        onOpenChange={handleCreateStoryClose}
+      />
     </div>
   );
 };

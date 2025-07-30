@@ -1,8 +1,9 @@
 
-import { Home, Users, Calendar, Trophy, MapPin, Settings, Bookmark, LogOut } from "lucide-react";
+import { Home, Users, Calendar, Trophy, Settings, Bookmark, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { toProperCase } from "@/lib/utils";
 import { useEffect, useState } from "react";
 import { getBackendUrl, getAvatarUrlWithCacheBust, clearUserSession } from "@/lib/utils";
 
@@ -50,7 +51,6 @@ export const Sidebar = ({ activeTab, setActiveTab, userProfile, setIsAuthenticat
     { icon: Users, label: "My Network", id: "network", count: 12 },
     { icon: Calendar, label: "Events", id: "events", count: 3 },
     { icon: Trophy, label: "Competitions", id: "competitions" },
-    { icon: MapPin, label: "Venues Nearby", id: "venues" },
     { icon: Bookmark, label: "Saved Posts", id: "saved" },
     { icon: Settings, label: "Settings", id: "settings" },
   ];
@@ -60,34 +60,26 @@ export const Sidebar = ({ activeTab, setActiveTab, userProfile, setIsAuthenticat
   // Remove fallback dummy profile
   const profile = userProfile;
 
-  // State for sport name
-  const [sport, setSport] = useState(profile?.sport || "");
+  // State for complete profile data
+  const [completeProfile, setCompleteProfile] = useState<any>(null);
 
   useEffect(() => {
-    // If sport is already present, no need to fetch
-    if (profile?.sport) return;
-    // Fetch sport from the appropriate table based on user_type
-    const fetchSport = async () => {
-      if (!profile?.id || !profile?.user_type) return;
-      let table = "";
-      switch (profile.user_type) {
-        case "athlete": table = "athletes"; break;
-        case "coach": table = "coaches"; break;
-        case "fan": table = "fans"; break;
-        case "venue": table = "venues"; break;
-        case "sports_brand": table = "sports_brands"; break;
-        default: return;
-      }
+    const fetchCompleteProfile = async () => {
+      if (!profile?.id) return;
+      
       try {
-        const res = await fetch(`/api/profile-sport?table=${table}&user_id=${profile.id}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.sport) setSport(data.sport);
+        const response = await fetch(`${getBackendUrl()}/api/users/${profile.id}`);
+        if (response.ok) {
+          const completeProfileData = await response.json();
+          setCompleteProfile(completeProfileData);
         }
-      } catch {}
+      } catch (error) {
+        console.error('Error fetching complete profile:', error);
+      }
     };
-    fetchSport();
-  }, [profile]);
+
+    fetchCompleteProfile();
+  }, [profile?.id]);
 
   return (
     <div className="p-4 space-y-6">
@@ -107,26 +99,26 @@ export const Sidebar = ({ activeTab, setActiveTab, userProfile, setIsAuthenticat
           
           {/* User Name and Type */}
           <div className="text-center space-y-2">
-            <h3 className="font-semibold text-foreground text-lg">
+            <h3 className="trofify-profile-name">
               {profile?.display_name || profile?.name || profile?.email}
             </h3>
             
-            {/* User Type Badge */}
-            {profile?.user_type && (
-              <Badge 
-                variant="secondary" 
-                className="text-xs font-medium px-3 py-1 bg-[#0e9591] text-white"
-              >
-                {profile.user_type.charAt(0).toUpperCase() + profile.user_type.slice(1)}
-              </Badge>
-            )}
-            
-            {/* Sport Badge */}
-            {sport && (
-              <Badge variant="secondary" className="text-xs mt-1 bg-[#0e9591] text-white px-3 py-1">
-                {sport}
-              </Badge>
-            )}
+            {/* User Type and Sport Badges */}
+            <div className="flex items-center justify-center space-x-1">
+              {(completeProfile?.sport || profile?.sport) && (
+                <Badge variant="secondary" className="text-xs bg-gray-600 text-white px-3 py-1 flex items-center justify-center">
+                  {completeProfile?.sport || profile?.sport}
+                </Badge>
+              )}
+              {(completeProfile?.user_type || profile?.user_type) && (
+                <Badge 
+                  variant="secondary" 
+                  className="text-xs font-medium px-3 py-1 bg-[#0e9591] text-white flex items-center justify-center"
+                >
+                  {toProperCase(completeProfile?.user_type || profile?.user_type)}
+                </Badge>
+              )}
+            </div>
           </div>
         </div>
         

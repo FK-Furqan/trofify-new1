@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from "react";
 import { ArrowLeft, Check, Trash2, Heart, MessageCircle, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { toProperCase } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { NotificationService, Notification } from "@/lib/notificationService";
 import { RealtimeNotificationService } from "@/lib/realtimeNotificationService";
 import { toast } from "@/components/ui/use-toast";
-import { getBackendUrl } from "@/lib/utils";
+import { getBackendUrl, formatTimestamp } from "@/lib/utils";
 
 interface NotificationsPageProps {
   userId: string;
@@ -60,8 +61,6 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick, onProfi
   };
 
   const handleNotificationClick = async (notification: Notification) => {
-    console.log('NotificationsPage: Notification clicked:', notification);
-    console.log('NotificationsPage: Post data:', notification.post);
     
     // Mark as read if not already read
     if (!notification.is_read) {
@@ -82,13 +81,11 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick, onProfi
 
     // Handle support notifications - navigate to supporter's profile
     if (notification.type === 'support' && notification.actor_id && onProfileClick) {
-      console.log('NotificationsPage: Support notification clicked, navigating to supporter profile:', notification.actor_id);
       try {
         // Fetch the supporter's complete profile data
         const response = await fetch(`${getBackendUrl()}/api/users/${notification.actor_id}`);
         if (response.ok) {
           const supporterProfile = await response.json();
-          console.log('NotificationsPage: Navigating to supporter profile:', supporterProfile);
           onProfileClick(supporterProfile);
           return; // Don't call onNotificationClick for support notifications
         } else {
@@ -123,7 +120,6 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick, onProfi
 
     // Call the parent handler for other notification types
     if (onNotificationClick) {
-      console.log('NotificationsPage: Calling parent onNotificationClick');
       onNotificationClick(notification);
     }
   };
@@ -178,17 +174,7 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick, onProfi
     return "/placeholder.svg";
   };
 
-  const formatTimeAgo = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
-    if (diffInSeconds < 60) return 'Just now';
-    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
-    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
-    if (diffInSeconds < 2592000) return `${Math.floor(diffInSeconds / 86400)}d ago`;
-    return date.toLocaleDateString();
-  };
 
   const getNotificationIcon = (type: string) => {
     switch (type) {
@@ -330,11 +316,18 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick, onProfi
                       <span className="font-medium text-sm">
                         {notification.actor?.display_name || notification.actor?.email}
                       </span>
-                      {notification.actor?.user_type && (
-                        <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
-                          {notification.actor.user_type}
-                        </Badge>
-                      )}
+                      <div className="flex items-center space-x-1">
+                        {notification.actor?.sport && (
+                          <Badge variant="secondary" className="text-xs bg-gray-600 text-white flex items-center justify-center">
+                            {toProperCase(notification.actor.sport)}
+                          </Badge>
+                        )}
+                        {notification.actor?.user_type && (
+                          <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white flex items-center justify-center">
+                            {toProperCase(notification.actor.user_type)}
+                          </Badge>
+                        )}
+                      </div>
                       {!notification.is_read && (
                         <div className="w-2 h-2 bg-primary rounded-full"></div>
                       )}
@@ -346,7 +339,7 @@ export const NotificationsPage = ({ userId, onBack, onNotificationClick, onProfi
                       )}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {formatTimeAgo(notification.created_at)}
+                      {formatTimestamp(notification.created_at)}
                     </p>
                   </div>
                   

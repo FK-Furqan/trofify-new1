@@ -8,7 +8,7 @@ import { PostCard } from "./PostCard";
 import axios from "axios";
 import { toast } from "@/components/ui/use-toast";
 import { Badge } from "@/components/ui/badge";
-import { getBackendUrl } from "@/lib/utils";
+import { getBackendUrl, formatTimestamp } from "@/lib/utils";
 import { UniversalLoader } from "@/components/ui/universal-loader";
 
 interface SavedPostsViewProps {
@@ -35,11 +35,9 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
     try {
       setLoading(true);
       const response = await axios.get(`${getBackendUrl()}/api/users/${userId}/saved-posts`);
-      console.log('Saved posts response:', response.data);
       setSavedPosts(response.data);
       setError("");
     } catch (err) {
-      console.error('Failed to fetch saved posts:', err);
       setError("Failed to load saved posts");
     } finally {
       setLoading(false);
@@ -60,23 +58,11 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
       // Remove from local state
       setSavedPosts(prev => prev.filter(post => post.id !== postId));
     } catch (err) {
-      console.error('Failed to unsave post:', err);
       toast({ title: "Error", description: "Failed to unsave post.", variant: "destructive" });
     }
   };
 
-  // Format date for display
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - date.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    if (diffDays === 1) return "1 day ago";
-    if (diffDays < 7) return `${diffDays} days ago`;
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)} week${Math.floor(diffDays / 7) > 1 ? 's' : ''} ago`;
-    return `${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`;
-  };
+
 
   const handleProfileClick = async (post: any) => {
     if (onProfileClick) {
@@ -85,10 +71,8 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
         const response = await fetch(`${getBackendUrl()}/api/users/${post.user_id}`);
         if (response.ok) {
           const completeProfile = await response.json();
-          console.log('SavedPostsView: Complete profile fetched:', completeProfile);
           onProfileClick(completeProfile);
         } else {
-          console.error('Failed to fetch complete profile, using fallback');
           // Fallback to basic profile data if fetch fails
           onProfileClick({
             id: post.user_id,
@@ -100,7 +84,6 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
           });
         }
       } catch (error) {
-        console.error('Error fetching complete profile:', error);
         // Fallback to basic profile data if fetch fails
         onProfileClick({
           id: post.user_id,
@@ -187,7 +170,7 @@ export const SavedPostsView = ({ onProfileClick, userId }: SavedPostsViewProps) 
                   likes: post.likes || 0,
                   comments: post.comments || 0,
                   shares: post.shares || 0,
-                  timeAgo: post.created_at ? formatDate(post.created_at) : "",
+                  timeAgo: post.created_at ? formatTimestamp(post.created_at) : "",
                   category: post.category || post.user_type,
                   isLiked: post.isLiked || false,
                   isSaved: post.isSaved || true,

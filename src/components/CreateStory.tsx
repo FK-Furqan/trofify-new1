@@ -1,19 +1,26 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
+import { toProperCase } from "@/lib/utils";
 import { X, Upload, Image as ImageIcon, Video, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { getBackendUrl } from "@/lib/utils";
+import { VideoTrimmer } from "./VideoTrimmer";
 
-export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
-  console.log('CreateStory rendered with props:', { user: !!user, open: open, onOpenChange: !!onOpenChange });
+interface CreateStoryProps {
+  user: any;
+  onStoryCreated: (story?: any) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export const CreateStory = React.memo(({ user, onStoryCreated, open, onOpenChange }: CreateStoryProps) => {
   
   if (!user) {
-    console.log('CreateStory: No user provided, returning null');
     return null;
   }
 
@@ -21,6 +28,8 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
   const [preview, setPreview] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [videoToTrim, setVideoToTrim] = useState<File | null>(null);
+  const [showVideoTrimmer, setShowVideoTrimmer] = useState(false);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
@@ -50,7 +59,7 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
     }
   };
 
-  const handleFileSelect = (event) => {
+  const handleFileSelect = async (event) => {
     const file = event.target.files[0];
     if (file) {
       // Validate file type
@@ -88,12 +97,37 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
         return;
       }
 
+      // Check if it's a video and needs trimming
+      if (file.type.startsWith('video/')) {
+        const duration = await getVideoDuration(file);
+        if (duration > 20) {
+          // Video is longer than 20 seconds, show trimmer
+          setVideoToTrim(file);
+          setShowVideoTrimmer(true);
+          return;
+        }
+      }
+
       setSelectedFile(file);
       
       // Create preview URL
       const previewUrl = URL.createObjectURL(file);
       setPreview(previewUrl);
     }
+  };
+
+  const getVideoDuration = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        resolve(video.duration);
+      };
+      video.onerror = () => {
+        resolve(0); // Default to 0 if we can't get duration
+      };
+      video.src = URL.createObjectURL(file);
+    });
   };
 
   const removeFile = () => {
@@ -108,6 +142,18 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
     if (cameraInputRef.current) {
       cameraInputRef.current.value = '';
     }
+  };
+
+  const handleVideoTrimmed = (trimmedFile: File) => {
+    setSelectedFile(trimmedFile);
+    setPreview(URL.createObjectURL(trimmedFile));
+    setVideoToTrim(null);
+    setShowVideoTrimmer(false);
+  };
+
+  const handleVideoTrimCancel = () => {
+    setVideoToTrim(null);
+    setShowVideoTrimmer(false);
   };
 
   const handleSubmit = async (e) => {
@@ -185,11 +231,11 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto z-50 w-[calc(100vw-2rem)] sm:w-auto mx-auto rounded-lg">
         <DialogHeader>
           <DialogTitle>Create Story</DialogTitle>
           <DialogDescription>
-            Share a moment with your TrofiFy community (visible for 24 hours)
+            Share a moment with your Trofify community (visible for 24 hours)
           </DialogDescription>
         </DialogHeader>
         
@@ -308,24 +354,25 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
           )}
 
           {/* Action Buttons */}
-          <div className="flex items-center justify-between pt-3 border-t">
-            <div className="text-xs text-muted-foreground">
+          <div className="flex flex-col sm:flex-row items-center gap-3 pt-3 border-t">
+            <div className="text-xs text-muted-foreground w-full sm:w-auto text-center sm:text-left">
               Stories are visible to your followers for 24 hours
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <Button 
                 type="button" 
                 variant="outline" 
                 onClick={() => onOpenChange(false)}
                 disabled={uploading}
+                className="flex-1 sm:flex-none"
               >
                 Cancel
               </Button>
               <Button 
                 type="submit" 
                 disabled={uploading || !selectedFile}
-                className="bg-[#0e9591] hover:bg-[#0c7b77] text-white"
+                className="bg-[#0e9591] hover:bg-[#0c7b77] text-white flex-1 sm:flex-none"
               >
                 {uploading ? "Sharing..." : "Share Story"}
               </Button>
@@ -333,6 +380,17 @@ export const CreateStory = ({ user, onStoryCreated, open, onOpenChange }) => {
           </div>
         </form>
       </DialogContent>
+
+      {/* Video Trimmer */}
+      {videoToTrim && (
+        <VideoTrimmer
+          file={videoToTrim}
+          onTrimmed={handleVideoTrimmed}
+          onCancel={handleVideoTrimCancel}
+          open={showVideoTrimmer}
+          onOpenChange={setShowVideoTrimmer}
+        />
+      )}
     </Dialog>
   );
-}; 
+}); 

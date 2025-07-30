@@ -11,16 +11,17 @@ import {
   Settings,
   Bookmark,
   Trophy,
-  MapPin,
   Users,
   LogOut,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { toProperCase } from "@/lib/utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Notification } from "@/lib/notificationService";
+import { DarkModeToggle } from "@/components/DarkModeToggle";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -114,7 +115,6 @@ export const MobileHeader = ({
       label: "Competitions",
       description: "Join competitions",
     },
-    { id: "venues", icon: MapPin, label: "Venues", description: "Find venues" },
     {
       id: "network",
       icon: Users,
@@ -131,12 +131,7 @@ export const MobileHeader = ({
   ];
 
   const handleProfileClick = () => {
-    console.log('Mobile header profile clicked');
-    if (userProfile) {
-      setActiveTab("profile");
-    } else {
-      console.error('No user profile available for mobile header profile click');
-    }
+    setActiveTab("profile");
   };
 
   const handleMenuItemClick = (itemId: string) => {
@@ -171,39 +166,35 @@ export const MobileHeader = ({
               onClick={() => setActiveTab("home")}
             >
               <img
-                src="/Trofify Logo.png?v=2"
-                alt="TrofiFy Logo"
+                              src="/Trofify Logo.png?v=2"
+              alt="Trofify Logo"
                 className="w-22 h-8 object-contain"
               />
             </div>
           </div>
 
-          {/* Right Side Icons - Plus and profile avatar here */}
+          {/* Right Side Icons - Dark mode toggle, notification and profile avatar here */}
           <div className="flex items-center space-x-1 ml-auto">
-            {/* Create Post Button */}
+            {/* Dark Mode Toggle */}
+            <DarkModeToggle />
+            
+            {/* Notification Button */}
             <Button 
               variant="ghost" 
               size="sm" 
-              className="p-2 hover:bg-muted"
+              className="p-2 hover:bg-muted relative"
               onClick={() => {
-                console.log('Create Post button clicked');
-                setActiveTab("create-post");
+                setActiveTab("notifications");
               }}
             >
-              <Plus className="h-5 w-5" />
+              <Bell className="h-5 w-5" />
+              {notificationCount > 0 && (
+                <Badge className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground text-xs h-4 w-4 p-0 flex items-center justify-center rounded-full">
+                  {notificationCount}
+                </Badge>
+              )}
             </Button>
-            {/* Create Story Button */}
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="p-2 text-orange-500 hover:bg-muted"
-              onClick={() => {
-                console.log('Create Story button clicked');
-                setActiveTab("create-story");
-              }}
-            >
-              <Calendar className="h-5 w-5" />
-            </Button>
+
             <Button
               variant="ghost"
               size="sm"
@@ -273,22 +264,22 @@ export const MobileHeader = ({
                     {profile?.display_name || profile?.name || profile?.email}
                   </h3>
                   
-                  {/* User Type Badge */}
-                  {profile?.user_type && (
-                    <Badge 
-                      variant="secondary" 
-                      className="text-xs font-medium px-3 py-1 bg-[#0e9591] text-white"
-                    >
-                      {profile.user_type.charAt(0).toUpperCase() + profile.user_type.slice(1)}
-                    </Badge>
-                  )}
-                  
-                  {/* Sport Badge - if available */}
-                  {profile?.sport && (
-                    <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white px-3 py-1">
-                      {profile.sport}
-                    </Badge>
-                  )}
+                  {/* User Type and Sport Badges */}
+                  <div className="flex items-center justify-center space-x-1">
+                    {profile?.sport && (
+                      <Badge variant="secondary" className="text-xs bg-gray-600 text-white px-3 py-1 flex items-center justify-center">
+                        {profile.sport}
+                      </Badge>
+                    )}
+                    {profile?.user_type && (
+                      <Badge 
+                        variant="secondary" 
+                        className="text-xs font-medium px-3 py-1 bg-[#0e9591] text-white flex items-center justify-center"
+                      >
+                        {toProperCase(profile.user_type)}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -302,7 +293,6 @@ export const MobileHeader = ({
                   { icon: Users, label: "My Network", id: "network", count: 12 },
                   { icon: Calendar, label: "Events", id: "events", count: 3 },
                   { icon: Trophy, label: "Competitions", id: "competitions" },
-                  { icon: MapPin, label: "Venues Nearby", id: "venues" },
                   { icon: Bookmark, label: "Saved Posts", id: "saved" },
                   { icon: Settings, label: "Settings", id: "settings" },
                 ].map((item, index) => (

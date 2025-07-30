@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { toProperCase } from "@/lib/utils";
 import {
   Heart,
   MessageCircle,
@@ -22,7 +23,10 @@ import {
   CarouselContent,
   CarouselItem,
 } from "@/components/ui/carousel";
-import { getBackendUrl } from "@/lib/utils";
+import { getBackendUrl, getLatestProfileImage, shouldRefreshAvatar } from "@/lib/utils";
+import { TaggedUsersRenderer } from "./TaggedUsersRenderer";
+import { toast } from "@/components/ui/use-toast";
+import { SupportService } from "@/lib/supportService";
 
 interface PostCardProps {
   post: any;
@@ -37,9 +41,14 @@ interface PostCardProps {
 }
 
 export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onSaveChange, onDelete, onPostClick, isSaved = false, variant = 'list' }: PostCardProps) => {
-  console.log('PostCard userId:', userId, 'for post', post.id);
   const [liked, setLiked] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [api, setApi] = useState<any>();
+  const [isSupporting, setIsSupporting] = useState(false);
+  const [supportLoading, setSupportLoading] = useState(false);
+
+  const isOwnPost = userId === post.author?.id;
 
   const handleProfileClick = async () => {
     if (onProfileClick) {
@@ -48,10 +57,8 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
         const response = await fetch(`${getBackendUrl()}/api/users/${post.author.id}`);
         if (response.ok) {
           const completeProfile = await response.json();
-          console.log("PostCard: Complete profile fetched:", completeProfile);
           onProfileClick(completeProfile);
         } else {
-          console.error('Failed to fetch complete profile, using fallback');
           // Fallback to basic profile data if fetch fails
           const fallbackProfile = {
             id: post.author.id,
@@ -64,11 +71,9 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
             description: `Professional ${post.author.sport} Player | Passionate about sports and fitness`,
             badge: post.author.sport,
           };
-          console.log("PostCard: Using fallback profile:", fallbackProfile);
           onProfileClick(fallbackProfile);
         }
       } catch (error) {
-        console.error('Error fetching complete profile:', error);
         // Fallback to basic profile data if fetch fails
         const fallbackProfile = {
           id: post.author.id,
@@ -81,7 +86,6 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
           description: `Professional ${post.author.sport} Player | Passionate about sports and fitness`,
           badge: post.author.sport,
         };
-        console.log("PostCard: Using fallback profile:", fallbackProfile);
         onProfileClick(fallbackProfile);
       }
     }
@@ -100,42 +104,128 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
     }
   };
 
-  // Check if this is the user's own post
-  const isOwnPost = userId && post.author.id && userId === post.author.id.toString();
 
-  // Helper to get the correct avatar URL
+
+  // Helper to get the correct avatar URL with latest image support
   const getAvatarUrl = (avatar?: string) => {
     if (!avatar) return "/placeholder.svg";
+    
+    // Check if we should use the latest profile image for the post author
+    if (post?.author?.id && shouldRefreshAvatar()) {
+      const latestImage = getLatestProfileImage(post.author.id, avatar);
+      if (latestImage !== "/placeholder.svg") {
+        return latestImage;
+      }
+    }
+    
     if (avatar.startsWith("http")) return avatar;
     return "/placeholder.svg";
   };
 
-  // Helper to get all images for the post
-  const getImages = () => {
-    // Support both single image (string) and multiple images (array)
-    if (Array.isArray(post.images) && post.images.length > 0) return post.images;
+  // Helper to get all media for the post
+  const getMedia = () => {
+    // Support both single media (string) and multiple media (array)
+    if (Array.isArray(post.images) && post.images.length > 0) {
+      // Handle new format where images can be objects with url and type
+      return post.images.map((item: any) => {
+        if (typeof item === 'string') {
+          return { url: item, type: 'image' };
+        }
+        return item;
+      });
+    }
     if (typeof post.images === 'string') {
       try {
         const arr = JSON.parse(post.images);
-        if (Array.isArray(arr)) return arr;
+        if (Array.isArray(arr)) {
+          return arr.map((item: any) => {
+            if (typeof item === 'string') {
+              return { url: item, type: 'image' };
+            }
+            return item;
+          });
+        }
       } catch {}
     }
-    if (post.image) return [post.image];
-    if (post.media_url) return [post.media_url];
+    if (post.image) return [{ url: post.image, type: 'image' }];
+    if (post.media_url) return [{ url: post.media_url, type: post.media_type || 'image' }];
     return [];
   };
-  const images = getImages();
-  console.log('PostCard images:', images, 'Post data:', post);
-  const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Helper to check if a media item is a video
+  const isVideo = (mediaItem: any) => {
+    if (typeof mediaItem === 'string') {
+      const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.wmv', '.flv', '.3gp'];
+      const lowerUrl = mediaItem.toLowerCase();
+      return videoExtensions.some(ext => lowerUrl.includes(ext)) || 
+             lowerUrl.includes('video/') ||
+             lowerUrl.includes('blob:') && post.media_type === 'video';
+    }
+    return mediaItem.type === 'video';
+  };
+  const media = getMedia();
+
+  // Handle support/un-support
+  const handleSupportClick = async () => {
+    if (!userId || !post.author?.id || userId === post.author.id || supportLoading) {
+      return;
+    }
+
+    setSupportLoading(true);
+    try {
+      const result = await SupportService.toggleSupport(userId, post.author.id);
+      setIsSupporting(result.action === 'supported');
+
+      if (result.action === 'supported') {
+        toast({
+          title: "Support Added",
+          description: `You are now supporting ${post.author.name}`,
+          variant: "success"
+        });
+      } else {
+        toast({
+          title: "Support Removed",
+          description: `You are no longer supporting ${post.author.name}`,
+          variant: "default"
+        });
+      }
+    } catch (error) {
+      console.error('Error toggling support:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update support status. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setSupportLoading(false);
+    }
+  };
+
+  // Check if current user is supporting this post author
+  useEffect(() => {
+    const checkSupportStatus = async () => {
+      if (!userId || !post.author?.id || userId === post.author.id) {
+        return;
+      }
+
+      try {
+        const supporting = await SupportService.isSupporting(userId, post.author.id);
+        setIsSupporting(supporting);
+      } catch (error) {
+        console.error('Error checking support status:', error);
+      }
+    };
+
+    checkSupportStatus();
+  }, [userId, post.author?.id]);
 
   return (
     <div
       className={
         variant === 'grid'
-          ? 'bg-card rounded-lg shadow-sm flex flex-col h-full border border-border'
-          : 'bg-card rounded-none lg:rounded-lg shadow-sm p-0 m-0 border-0 border-b-2 border-border'
+          ? 'bg-card border border-border rounded-lg shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow'
+          : 'bg-card border border-border rounded-lg shadow-sm overflow-hidden'
       }
-      style={variant === 'grid' ? { minHeight: 380, maxHeight: 480 } : {}}
     >
       {/* Header */}
       <div
@@ -156,23 +246,50 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
           <div>
             <div className="flex items-center space-x-1">
               <span
-                className="font-semibold text-foreground text-sm cursor-pointer hover:underline"
+                className="trofify-profile-name cursor-pointer hover:underline"
                 onClick={handleProfileClick}
-                style={variant === 'grid' ? { fontSize: '1rem' } : {}}
               >
                 {post.author.name}
               </span>
+              {!isOwnPost && <span className="text-white text-xs">⦿</span>}
               {post.author.verified && (
                 <div className="w-4 h-4 bg-[#0e9591] rounded-full flex items-center justify-center">
                   <span className="text-white text-xs">✓</span>
                 </div>
               )}
-              <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
-                {post.author.sport}
-              </Badge>
+              {!isOwnPost && (
+                <>
+                  <div className="w-0.5"></div> {/* 2px gap */}
+                  <span
+                    className={`trofify-profile-name font-bold cursor-pointer hover:underline transition-all duration-200 hover:opacity-80 text-sm ${
+                      isSupporting 
+                        ? 'text-gray-400 opacity-70' 
+                        : 'text-[#0e9591]'
+                    }`}
+                    onClick={handleSupportClick}
+                    style={{ pointerEvents: supportLoading ? 'none' : 'auto', opacity: supportLoading ? 0.5 : 1 }}
+                    title={isSupporting ? "Click to unsupport" : "Click to support"}
+                  >
+                    {supportLoading ? 'Loading...' : (isSupporting ? 'Supporting' : 'Support')}
+                  </span>
+                </>
+              )}
             </div>
-            <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-              <span>{post.timeAgo}</span>
+            <div className="flex flex-col space-y-1">
+              <div></div> {/* Spacer for top */}
+              <div className="flex items-center space-x-1">
+                {post.author.userSport && (
+                  <Badge variant="secondary" className="text-xs bg-gray-600 text-white w-fit flex items-center justify-center">
+                    {toProperCase(post.author.userSport)}
+                  </Badge>
+                )}
+                <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white w-fit flex items-center justify-center">
+                  {toProperCase(post.author.sport)}
+                </Badge>
+              </div>
+              <div className="flex items-center space-x-1">
+                <span className="trofify-time">{post.timeAgo}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -201,17 +318,22 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
 
       {/* Content */}
       <div className={variant === 'grid' ? 'flex-1 flex flex-col justify-start px-3 pb-2' : 'mb-2'}>
-        <p
+        <div
           className={
             variant === 'grid'
-              ? 'text-foreground font-medium mb-2 line-clamp-2 cursor-pointer'
-              : 'text-foreground mb-4 px-4 lg:px-6 cursor-pointer hover:bg-muted/50 transition-colors'
+              ? 'trofify-caption mb-2 line-clamp-2 cursor-pointer'
+              : 'trofify-caption mb-4 px-4 lg:px-6 cursor-pointer hover:bg-muted/50 transition-colors'
           }
           onClick={() => onPostClick && onPostClick(post)}
         >
-          {post.content}
-        </p>
-        {images.length > 1 ? (
+          <TaggedUsersRenderer
+            text={post.content || post.description || ""}
+            taggedUsers={post.tagged_users || []}
+            onUserClick={onProfileClick}
+            className="whitespace-pre-wrap break-words"
+          />
+        </div>
+        {media.length > 1 ? (
           <div className="relative w-full">
             <Carousel
               className="w-full"
@@ -223,7 +345,7 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
               }}
             >
               <CarouselContent className="w-full">
-                {images.map((img: string, idx: number) => (
+                {media.map((mediaItem: any, idx: number) => (
                   <CarouselItem key={idx}>
                     <div 
                       className={
@@ -233,11 +355,21 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
                       }
                       onClick={() => onPostClick && onPostClick(post)}
                     >
-                      <img
-                        src={img}
-                        alt={`Post image ${idx + 1}`}
-                        className="w-full h-full object-cover"
-                      />
+                      {isVideo(mediaItem) ? (
+                        <video
+                          src={mediaItem.url}
+                          className="w-full h-full object-cover"
+                          muted
+                          playsInline
+                          preload="metadata"
+                        />
+                      ) : (
+                        <img
+                          src={mediaItem.url}
+                          alt={`Post media ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      )}
                     </div>
                   </CarouselItem>
                 ))}
@@ -245,7 +377,7 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
             </Carousel>
             {/* Pagination dots */}
             <div className="flex justify-center mt-2 space-x-1">
-              {images.map((_, idx) => (
+              {media.map((_, idx) => (
                 <span
                   key={idx}
                   className={`inline-block w-2 h-2 rounded-full transition-all duration-200 ${idx === currentIndex ? 'bg-[#0e9591]' : 'bg-muted-foreground/30'}`}
@@ -253,7 +385,7 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
               ))}
             </div>
           </div>
-        ) : images.length === 1 ? (
+        ) : media.length === 1 ? (
           <div 
             className={
               variant === 'grid'
@@ -262,28 +394,41 @@ export const PostCard = ({ post, onProfileClick, showTopMenu = true, userId, onS
             }
             onClick={() => onPostClick && onPostClick(post)}
           >
-            <img
-              src={images[0]}
-              alt="Post content"
-              className="w-full h-full object-cover"
-            />
+            {isVideo(media[0]) ? (
+              <video
+                src={media[0].url}
+                className="w-full h-full object-cover"
+                muted
+                playsInline
+                preload="metadata"
+                controls
+              />
+            ) : (
+              <img
+                src={media[0].url}
+                alt="Post content"
+                className="w-full h-full object-cover"
+              />
+            )}
           </div>
         ) : null}
-      </div>
 
-      {/* Actions */}
-      <div className={variant === 'grid' ? 'mt-auto' : ''}>
-        <PostActions
-          postId={post.id}
-          userId={userId}
-          initialLikes={post.likes}
-          initialComments={post.comments}
-          initialShares={post.shares}
-          initialSaved={post.isSaved}
-          initialLiked={post.isLiked}
-          onProfileClick={onProfileClick}
-          onSaveChange={onSaveChange}
-        />
+        {/* Post Actions */}
+        {variant !== 'grid' && (
+          <PostActions
+            postId={Number(post.id)}
+            userId={userId}
+            initialLikes={post.likes || 0}
+            initialComments={post.comments || 0}
+            initialShares={post.shares || 0}
+            initialSaved={isSaved}
+            initialLiked={post.isLiked || false}
+            onProfileClick={onProfileClick}
+            isOwner={isOwnPost}
+            onDelete={onDelete ? (postId: number) => onDelete(String(postId)) : undefined}
+            onSaveChange={onSaveChange}
+          />
+        )}
       </div>
     </div>
   );

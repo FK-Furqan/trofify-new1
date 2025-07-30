@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo, useCallback, memo } from "react";
 import { PostCard } from "./PostCard";
 import { PostModal } from "./PostModal";
 import { CreatePost } from "./CreatePost";
-import { getBackendUrl } from "@/lib/utils";
+import { getBackendUrl, formatTimestamp } from "@/lib/utils";
 import { UniversalLoader } from "@/components/ui/universal-loader";
 
 interface FeedProps {
@@ -13,22 +13,9 @@ interface FeedProps {
   onLoadingComplete?: () => void;
 }
 
-function formatTimeAgo(dateString: string) {
-  const now = new Date();
-  const date = new Date(dateString);
-  const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
-  
-  if (diff < 60) return `${diff}s`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d`;
-  
-  // After 24 hours, show the actual date
-  return date.toLocaleDateString();
-}
+
 
 const FeedComponent = ({ onProfileClick, userId, onSaveChange, onLoadingComplete }: FeedProps) => {
-  console.log('Feed userId:', userId);
   const [posts, setPosts] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -75,7 +62,7 @@ const FeedComponent = ({ onProfileClick, userId, onSaveChange, onLoadingComplete
           likes: post.likes_count || 0, // Use backend count if available
           comments: post.comments_count || 0, // Use backend count if available
           shares: post.shares_count || 0,
-          timeAgo: post.created_at ? formatTimeAgo(post.created_at) : "",
+          timeAgo: post.created_at ? formatTimestamp(post.created_at) : "",
           isLiked: !!post.isLiked, // Use backend value for like state
           isSaved: !!post.isSaved, // Use backend value for save state
         };

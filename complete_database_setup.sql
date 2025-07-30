@@ -1,4 +1,4 @@
--- TrofiFy Complete Database Setup
+-- Trofify Complete Database Setup
 -- Run these commands in your Supabase SQL Editor
 
 -- ================================

@@ -1,4 +1,4 @@
--- TrofiFy Supabase Storage Setup
+-- Trofify Supabase Storage Setup
 -- Run these commands in your Supabase SQL Editor
 
 -- 1. Add display_name column to users table (if not already added)

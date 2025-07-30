@@ -9,9 +9,11 @@ import { CoachSignupForm } from "./auth/CoachSignupForm";
 import { FanSignupForm } from "./auth/FanSignupForm";
 import { VenueSignupForm } from "./auth/VenueSignupForm";
 import { SportsBrandSignupForm } from "./auth/SportsBrandSignupForm";
+import { MediaCreatorSignupForm } from "./auth/MediaCreatorSignupForm";
+import { OrganizationInstituteSignupForm } from "./auth/OrganizationInstituteSignupForm";
 import { Trophy } from "lucide-react";
 
-export type UserCategory = "athlete" | "coach" | "fan" | "venue" | "sports_brand";
+export type UserCategory = "athlete" | "coach" | "fan" | "venue" | "sports_brand" | "media_creator" | "organization_institute";
 
 interface AuthSystemProps {
   onAuthSuccess: (email?: string) => void;
@@ -33,6 +35,10 @@ export const AuthSystem = ({ onAuthSuccess }: AuthSystemProps) => {
         return <VenueSignupForm onSuccess={(email) => onAuthSuccess(email)} onBack={() => setSelectedCategory(null)} />;
       case "sports_brand":
         return <SportsBrandSignupForm onSuccess={(email) => onAuthSuccess(email)} onBack={() => setSelectedCategory(null)} />;
+      case "media_creator":
+        return <MediaCreatorSignupForm onSuccess={(email) => onAuthSuccess(email)} onBack={() => setSelectedCategory(null)} />;
+      case "organization_institute":
+        return <OrganizationInstituteSignupForm onSuccess={(email) => onAuthSuccess(email)} onBack={() => setSelectedCategory(null)} />;
       default:
         return <SignupCategorySelection onSelectCategory={setSelectedCategory} />;
     }
@@ -42,12 +48,12 @@ export const AuthSystem = ({ onAuthSuccess }: AuthSystemProps) => {
     <>
       {/* Desktop: Two-column layout */}
       <div className="auth-system-2col min-h-screen bg-background items-center justify-center p-0 hidden md:flex">
-        <div className="auth-system-2col__container flex w-full max-w-4xl bg-card border border-border rounded-lg shadow-lg overflow-hidden">
+        <div className="auth-system-2col__container flex w-full max-w-6xl bg-card border border-border rounded-lg shadow-lg overflow-hidden">
           {/* Left: Logo */}
           <div className="auth-system-2col__logo flex-1 flex flex-col items-center justify-center bg-muted p-8">
             <img
               src="/Trofify Logo.png?v=2"
-              alt="TrofiFy Logo"
+              alt="Trofify Logo"
               className="w-60 h-60 object-contain mb-4"
             />
           </div>
@@ -55,7 +61,7 @@ export const AuthSystem = ({ onAuthSuccess }: AuthSystemProps) => {
           <div className="auth-system-2col__form flex-1 flex flex-col justify-center p-8">
             <Card>
               <CardHeader className="text-center">
-                <CardTitle>{authMode === "login" ? "Welcome Back" : "Join TrofiFy"}</CardTitle>
+                <CardTitle>{authMode === "login" ? "Welcome Back" : "Join Trofify"}</CardTitle>
                 <CardDescription>
                   {authMode === "login" 
                     ? "Sign in to your account to continue" 
@@ -103,15 +109,15 @@ export const AuthSystem = ({ onAuthSuccess }: AuthSystemProps) => {
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-0 md:hidden">
         <div className="text-center mb-2">
           <img
-            src="/Trofify Logo.png?v=2"
-            alt="TrofiFy Logo"
+                          src="/Trofify Logo.png?v=2"
+              alt="Trofify Logo"
             className="w-64 h-64 object-contain mx-auto mb-1"
           />
         </div>
         <div className="w-full max-w-md px-2">
           <Card>
             <CardHeader className="text-center">
-              <CardTitle>{authMode === "login" ? "Welcome Back" : "Join TrofiFy"}</CardTitle>
+                              <CardTitle>{authMode === "login" ? "Welcome Back" : "Join Trofify"}</CardTitle>
               <CardDescription>
                 {authMode === "login" 
                   ? "Sign in to your account to continue" 

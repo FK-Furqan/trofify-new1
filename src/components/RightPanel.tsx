@@ -2,36 +2,46 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, MapPin, Trophy, Users } from "lucide-react";
+import { toProperCase } from "@/lib/utils";
+import { Calendar, MapPin, Trophy, Users, MessageCircle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { getBackendUrl } from "@/lib/utils";
 
 interface RightPanelProps {
   onProfileClick?: (profile: any) => void;
+  onMessageClick?: (userId: string) => void;
+  currentUserId?: string;
 }
 
-export const RightPanel = ({ onProfileClick }: RightPanelProps) => {
-  const suggestions = [
-    {
-      name: "Tom Anderson",
-      sport: "Basketball",
-      avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face",
-      mutualConnections: 12,
-      verified: true
-    },
-    {
-      name: "Maria Garcia",
-      sport: "Tennis",
-      avatar: "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=100&h=100&fit=crop&crop=face",
-      mutualConnections: 8,
-      verified: false
-    },
-    {
-      name: "David Kim",
-      sport: "Swimming",
-      avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face",
-      mutualConnections: 15,
-      verified: true
-    }
-  ];
+export const RightPanel = ({ onProfileClick, onMessageClick, currentUserId }: RightPanelProps) => {
+  const [recentPosts, setRecentPosts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch recent posts
+  useEffect(() => {
+    const fetchRecentPosts = async () => {
+      if (!currentUserId) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${getBackendUrl()}/api/posts/recent?limit=3&user_id=${currentUserId}`);
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Recent posts data received:', data);
+          console.log('Number of posts:', data.length);
+          setRecentPosts(data.slice(0, 3)); // Ensure only 3 posts
+        }
+      } catch (error) {
+        console.error('Failed to fetch recent posts:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecentPosts();
+  }, [currentUserId]);
 
   const upcomingEvents = [
     {
@@ -59,45 +69,89 @@ export const RightPanel = ({ onProfileClick }: RightPanelProps) => {
 
   return (
     <div className="p-4 space-y-6">
-      {/* People You May Know */}
+      {/* Recent Posts */}
       <div className="bg-card border border-border rounded-lg shadow-sm p-4">
         <h3 className="font-semibold text-foreground mb-4 flex items-center">
           <Users className="h-4 w-4 mr-2" />
-          People You May Know
+          Recent Posts
         </h3>
         <div className="space-y-4">
-          {suggestions.map((person, index) => (
-            <div key={index} className="flex items-center justify-between">
+          {loading ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center justify-between animate-pulse">
+                  <div className="flex items-center space-x-3">
+                    <div className="h-10 w-10 bg-muted rounded-full"></div>
+                    <div className="space-y-2">
+                      <div className="h-4 w-24 bg-muted rounded"></div>
+                      <div className="h-3 w-16 bg-muted rounded"></div>
+                      <div className="h-3 w-20 bg-muted rounded"></div>
+                    </div>
+                  </div>
+                  <div className="h-8 w-16 bg-muted rounded"></div>
+                </div>
+              ))}
+            </div>
+          ) : recentPosts.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No recent posts</p>
+          ) : (
+            recentPosts.map((post, index) => (
+              <div key={post.id || `post-${index}`} className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <Avatar 
                   className="h-10 w-10 cursor-pointer" 
-                  onClick={() => onProfileClick?.(person)}
+                    onClick={() => {
+                      console.log('Profile clicked:', post.author);
+                      onProfileClick?.(post.author);
+                    }}
                 >
-                  <AvatarImage src={person.avatar} />
-                  <AvatarFallback>{person.name[0]}</AvatarFallback>
+                    <AvatarImage src={post.author?.avatar || "/placeholder.svg"} />
+                    <AvatarFallback>{(post.author?.display_name || post.author?.email || "U")[0]}</AvatarFallback>
                 </Avatar>
                 <div>
                   <div className="flex items-center space-x-1">
-                    <span className="font-medium text-foreground text-sm">{person.name}</span>
-                    {person.verified && (
+                      <span 
+                        className="trofify-profile-name cursor-pointer hover:text-[#0e9591] transition-colors"
+                        onClick={() => onProfileClick?.(post.author)}
+                      >
+                        {post.author?.display_name || post.author?.email?.split('@')[0] || "Unknown"}
+                      </span>
+                      {post.author?.verified && (
                       <div className="w-3 h-3 bg-[#0e9591] rounded-full flex items-center justify-center">
                         <span className="text-white text-xs">✓</span>
                       </div>
                     )}
                   </div>
-                  <Badge variant="secondary" className="text-xs mt-1 bg-[#0e9591] text-white">
-                    {person.sport}
-                  </Badge>
+                  <div className="flex items-center space-x-1 mt-1">
+                    {post.author?.userSport && (
+                      <Badge variant="secondary" className="text-xs bg-gray-600 text-white flex items-center justify-center">
+                        {toProperCase(post.author.userSport)}
+                      </Badge>
+                    )}
+                    <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white flex items-center justify-center">
+                      {toProperCase(post.author?.sport || post.author?.user_type || "user")}
+                    </Badge>
+                  </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {person.mutualConnections} mutual connections
+                      {post.supporter_count || 0} supporters
                   </p>
+                  </div>
                 </div>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => {
+                    console.log('Message clicked for user ID:', post.author?.id || post.user_id);
+                    onMessageClick?.(post.author?.id || post.user_id);
+                  }}
+                  className="flex items-center space-x-1"
+                >
+                  <MessageCircle className="h-3 w-3" />
+                  <span>Message</span>
+                </Button>
               </div>
-              <Button size="sm" variant="outline">
-                Connect
-              </Button>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
 

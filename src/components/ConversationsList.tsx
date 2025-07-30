@@ -7,6 +7,7 @@ import { Conversation } from "@/lib/messagingService";
 import { messagingService } from "@/lib/messagingService";
 import { UniversalLoader } from "@/components/ui/universal-loader";
 import { Badge } from "@/components/ui/badge";
+import { toProperCase } from "@/lib/utils";
 import { getSocket } from "@/lib/socket";
 import { MessageTicks } from "./MessageTicks";
 
@@ -312,9 +313,16 @@ export const ConversationsList = ({
                           isOwnMessage={true} 
                         />
                       )}
-                      <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
-                        {conversation.other_user.user_type}
-                      </Badge>
+                      <div className="flex items-center space-x-1">
+                        {conversation.other_user.sport && (
+                          <Badge variant="secondary" className="text-xs bg-gray-600 text-white flex items-center justify-center">
+                            {toProperCase(conversation.other_user.sport)}
+                          </Badge>
+                        )}
+                        <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white flex items-center justify-center">
+                          {toProperCase(conversation.other_user.user_type)}
+                        </Badge>
+                      </div>
                     </div>
                   </div>
                   

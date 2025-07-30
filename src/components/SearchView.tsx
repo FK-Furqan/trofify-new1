@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { getBackendUrl } from "@/lib/utils";
+import { getBackendUrl, formatTimestamp } from "@/lib/utils";
 import { UniversalLoader } from "@/components/ui/universal-loader";
 
 interface SearchViewProps {
@@ -134,7 +134,7 @@ export const SearchView = ({ onProfileClick, userId, onSaveChange, onLoadingComp
           likes: post.likes_count || 0,
           comments: post.comments_count || 0,
           shares: post.shares_count || 0,
-          timeAgo: post.created_at ? formatTimeAgo(post.created_at) : "",
+          timeAgo: post.created_at ? formatTimestamp(post.created_at) : "",
           category: author.sport,
           isLiked: !!post.isLiked,
           isSaved: !!post.isSaved,
@@ -187,18 +187,7 @@ export const SearchView = ({ onProfileClick, userId, onSaveChange, onLoadingComp
     setFilteredPosts(filtered);
   }, [searchQuery, selectedFilter, posts]);
 
-  // Format time ago
-  const formatTimeAgo = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - date.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    if (diffDays === 1) return "1 day ago";
-    if (diffDays < 7) return `${diffDays} days ago`;
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)} week${Math.floor(diffDays / 7) > 1 ? 's' : ''} ago`;
-    return `${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`;
-  };
+
 
   const handlePostClick = (post: any) => {
     setSelectedPost(post);
@@ -232,7 +221,7 @@ export const SearchView = ({ onProfileClick, userId, onSaveChange, onLoadingComp
       <div className="bg-card rounded-none lg:rounded-lg shadow-sm">
         {/* Header */}
         <div className="p-6 border-b border-border">
-          <h1 className="text-2xl font-bold text-foreground mb-4">Explore Posts</h1>
+  
           {/* Search Bar */}
           <div className="relative mb-4">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />

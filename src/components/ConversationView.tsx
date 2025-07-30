@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, MoreVertical, Send, ChevronDown } from 'lucide-react';
 import { messagingService, Message, Conversation } from '@/lib/messagingService';
 import { getSocket } from '@/lib/socket';
+import { formatTimestamp, toProperCase } from '@/lib/utils';
 import { MessageTicks } from './MessageTicks';
 
 // Custom slow bounce animation
@@ -22,6 +23,23 @@ const slowBounceStyle = `
     }
     90% {
       transform: translate3d(0, -2px, 0);
+    }
+  }
+  
+  .message-bubble {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  
+  .read-more-button {
+    display: inline;
+    cursor: pointer;
+    user-select: none;
+  }
+  
+  @media (max-width: 768px) {
+    .message-bubble {
+      max-width: 90% !important;
     }
   }
 `;
@@ -46,6 +64,8 @@ export const ConversationView = ({
   const [otherUserStatus, setOtherUserStatus] = useState<'online' | 'offline'>('offline');
   const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [showDateBadges, setShowDateBadges] = useState(false);
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
   
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -66,16 +86,72 @@ export const ConversationView = ({
     );
   }
 
-  // Format time for display
+  // Format time for display - only show time
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
-    const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    return date.toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    });
+  };
+
+
+
+  // Helper functions for read more/read less
+  const isMessageLong = (content: string) => {
+    return content.length > 120; // Show read more after 120 characters for better mobile experience
+  };
+
+  const truncateMessage = (content: string) => {
+    if (content.length <= 120) return content;
     
-    if (diffInMinutes < 1) return "0m";
-    if (diffInMinutes < 60) return `${diffInMinutes}m`;
-    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h`;
-    return `${Math.floor(diffInMinutes / 1440)}d`;
+    // Try to find a good breaking point (space, punctuation)
+    const truncated = content.substring(0, 120);
+    const lastSpace = truncated.lastIndexOf(' ');
+    const lastPeriod = truncated.lastIndexOf('.');
+    const lastComma = truncated.lastIndexOf(',');
+    
+    // Find the best breaking point
+    const breakPoint = Math.max(lastSpace, lastPeriod, lastComma);
+    
+    if (breakPoint > 80) { // Only use break point if it's not too early
+      return content.substring(0, breakPoint + 1);
+    }
+    
+    return truncated;
+  };
+
+  // Create WhatsApp-style text with inline "Read more"
+  const createWhatsAppStyleText = (content: string, messageId: string, isExpanded: boolean) => {
+    if (!isMessageLong(content) || isExpanded) {
+      return content;
+    }
+
+    const truncated = truncateMessage(content);
+    return (
+      <>
+        {truncated}
+        <button
+          onClick={() => toggleMessageExpansion(messageId)}
+          className="text-[#1E90FF] hover:underline ml-1 text-[6px] sm:text-[10px] font-medium read-more-button"
+        >
+          Read more
+        </button>
+      </>
+    );
+  };
+
+  const toggleMessageExpansion = (messageId: string) => {
+    setExpandedMessages(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId);
+      } else {
+        newSet.add(messageId);
+      }
+      return newSet;
+    });
   };
 
   // Scroll to bottom of messages
@@ -87,13 +163,16 @@ export const ConversationView = ({
     inputRef.current?.focus();
   };
 
-  // Handle scroll events to show/hide scroll to bottom button
+  // Handle scroll events to show/hide scroll to bottom button and date badges
   const handleScroll = useCallback(() => {
     if (messagesContainerRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
-      // Show button as soon as user scrolls up (more sensitive threshold)
+      // Show button when not at the bottom (more sensitive threshold)
       const isAtBottom = scrollHeight - scrollTop - clientHeight < 10; // 10px threshold
       setShowScrollToBottom(!isAtBottom);
+      
+      // Show date badges when user scrolls up (not at bottom)
+      setShowDateBadges(!isAtBottom);
     }
   }, []);
 
@@ -275,15 +354,15 @@ export const ConversationView = ({
     // Listen for delivery status updates
     const handleMessageDelivered = (data: any) => {
       if (data.conversation_id === conversation.id) {
-        console.log('Message delivered event received:', data);
+
         setMessages(prev => prev.map(msg => {
           if (msg.id === data.message_id) {
             // Only update to delivered if not already read
             if (msg.delivery_status !== 'read') {
-              console.log(`Updating message ${msg.id} from ${msg.delivery_status} to delivered`);
+
               return { ...msg, delivery_status: 'delivered' };
             } else {
-              console.log(`Message ${msg.id} is already read, keeping read status`);
+              
             }
             return msg;
           }
@@ -294,10 +373,10 @@ export const ConversationView = ({
 
     const handleMessageRead = (data: any) => {
       if (data.conversation_id === conversation.id) {
-        console.log('Message read event received:', data);
+
         setMessages(prev => prev.map(msg => {
           if (msg.id === data.message_id) {
-            console.log(`Updating message ${msg.id} to read status`);
+
             return { ...msg, delivery_status: 'read', is_read: true };
           }
           return msg;
@@ -423,12 +502,19 @@ export const ConversationView = ({
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h3 className="font-semibold text-foreground">
+              <h3 className="trofify-profile-name">
                 {conversation?.other_user?.display_name || 'User'}
               </h3>
-              <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
-                {conversation?.other_user?.user_type || 'user'}
-              </Badge>
+              <div className="flex items-center space-x-1">
+                {conversation?.other_user?.sport && (
+                  <Badge variant="secondary" className="text-xs bg-gray-600 text-white flex items-center justify-center">
+                    {toProperCase(conversation.other_user.sport)}
+                  </Badge>
+                )}
+                <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white flex items-center justify-center">
+                  {toProperCase(conversation?.other_user?.user_type || 'user')}
+                </Badge>
+              </div>
               <span className={`text-xs ${otherUserStatus === 'online' ? 'text-green-500' : 'text-gray-500'}`}>
                 {otherUserStatus === 'online' ? 'Online' : 'Offline'}
               </span>
@@ -436,7 +522,7 @@ export const ConversationView = ({
             {/* Typing indicator below user name */}
             {isOtherUserTyping && (
               <div className="flex items-center space-x-1 mt-1">
-                <span className="text-xs text-[#0e9591] font-medium">typing</span>
+                <span className="trofify-typing text-[#0e9591]">typing</span>
                 <div className="flex space-x-1">
                   <div className="w-1 h-1 bg-[#0e9591] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
                   <div className="w-1 h-1 bg-[#0e9591] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
@@ -452,8 +538,8 @@ export const ConversationView = ({
       </div>
 
       {/* Scrollable Messages Area - Only this section scrolls */}
-      <div className="flex-1 min-h-0 overflow-y-auto bg-background scrollbar-hide relative" ref={messagesContainerRef} onScroll={handleScroll}>
-        <div className="p-4 space-y-4">
+      <div className="flex-1 min-h-0 overflow-y-auto bg-background scrollbar-hide relative max-h-[calc(100vh-14rem)] md:max-h-[calc(100vh-14rem)] pb-0 md:pb-0" ref={messagesContainerRef} onScroll={handleScroll}>
+        <div className="p-4 pb-0 space-y-3">
           {loading ? (
             <div className="space-y-4">
               {/* Message skeleton - left side (received) */}
@@ -466,9 +552,9 @@ export const ConversationView = ({
               
               {/* Message skeleton - right side (sent) */}
               <div className="flex justify-end">
-                <div className="max-w-xs lg:max-w-md px-4 py-2 rounded-lg bg-[#0e9591]/20 animate-pulse">
-                  <div className="h-4 bg-[#0e9591]/40 rounded mb-2"></div>
-                  <div className="h-3 bg-[#0e9591]/40 rounded w-12"></div>
+                <div className="max-w-xs lg:max-w-md px-4 py-2 rounded-lg bg-[#054a4a]/20 animate-pulse">
+                  <div className="h-4 bg-[#054a4a]/40 rounded mb-2"></div>
+                  <div className="h-3 bg-[#054a4a]/40 rounded w-12"></div>
                 </div>
               </div>
               
@@ -483,9 +569,9 @@ export const ConversationView = ({
               
               {/* Message skeleton - right side (sent) */}
               <div className="flex justify-end">
-                <div className="max-w-xs lg:max-w-md px-4 py-2 rounded-lg bg-[#0e9591]/20 animate-pulse">
-                  <div className="h-4 bg-[#0e9591]/40 rounded mb-2 w-2/3"></div>
-                  <div className="h-3 bg-[#0e9591]/40 rounded w-14"></div>
+                <div className="max-w-xs lg:max-w-md px-4 py-2 rounded-lg bg-[#054a4a]/20 animate-pulse">
+                  <div className="h-4 bg-[#054a4a]/40 rounded mb-2 w-2/3"></div>
+                  <div className="h-3 bg-[#054a4a]/40 rounded w-14"></div>
                 </div>
               </div>
             </div>
@@ -497,58 +583,102 @@ export const ConversationView = ({
               </div>
             </div>
           ) : (
-            messages.map((message) => (
-              <div
-                key={message.id}
+            messages.map((message, index) => {
+              // Check if we need to show a date badge
+              const showDateBadge = showDateBadges;
+              const currentMessageDate = new Date(message.created_at);
+              const previousMessageDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
+              
+              // Show date badge for first message when scrolling up, or when date changes
+              const shouldShowDateBadge = showDateBadge && (
+                index === 0 || 
+                (previousMessageDate && currentMessageDate.toDateString() !== previousMessageDate.toDateString())
+              );
+              
+              return (
+                <React.Fragment key={message.id}>
+                  {/* Date Badge */}
+                  {shouldShowDateBadge && (
+                    <div className="flex justify-center my-4">
+                      <div className="bg-muted/80 backdrop-blur-sm text-muted-foreground px-3 py-1 rounded-full text-xs font-medium">
+                        {formatTimestamp(message.created_at)}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Message */}
+                  <div
                 className={`flex ${message.sender_id === currentUserId ? "justify-end" : "justify-start"}`}
               >
-                <div
-                  className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                                <div
+                  className={`max-w-[85%] sm:max-w-xs lg:max-w-md px-3 py-2 rounded-lg message-bubble ${
                     message.sender_id === currentUserId
-                      ? "bg-[#0e9591] text-white"
+                          ? "bg-[#054a4a] text-white"
                       : message.is_read 
                         ? "bg-muted text-foreground"
                         : "bg-blue-100 dark:bg-blue-900/30 text-foreground border-2 border-blue-300 dark:border-blue-600"
                   }`}
                 >
-                  <p className={`text-sm ${!message.is_read && message.sender_id !== currentUserId ? "font-semibold" : ""}`}>
-                    {message.content}
-                  </p>
-                  <div className="flex items-center justify-between mt-1">
-                    <p className="text-xs opacity-70">
-                      {formatTime(message.created_at)}
-                    </p>
-                    <MessageTicks 
-                      deliveryStatus={message.delivery_status || 'sent'} 
-                      isOwnMessage={message.sender_id === currentUserId} 
-                    />
+                  <div className="space-y-0.5">
+                    <div className={`text-base break-words whitespace-normal leading-relaxed ${!message.is_read && message.sender_id !== currentUserId ? "font-semibold" : ""}`}>
+                      {expandedMessages.has(message.id) ? (
+                        <>
+                          {message.content}
+                          {isMessageLong(message.content) && (
+                            <button
+                              onClick={() => toggleMessageExpansion(message.id)}
+                              className="text-[#1E90FF] hover:underline ml-1 text-[6px] sm:text-[10px] font-medium read-more-button"
+                            >
+                              Read less
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        createWhatsAppStyleText(message.content, message.id, false)
+                      )}
+                    </div>
                   </div>
-                </div>
+                  
+                  <div className="flex items-center justify-end gap-1 mt-1.5">
+                    <p className="text-[10px] opacity-70">
+                  {formatTime(message.created_at)}
+                </p>
+                <MessageTicks 
+                  deliveryStatus={message.delivery_status || 'sent'} 
+                  isOwnMessage={message.sender_id === currentUserId} 
+                />
               </div>
-            ))
+            </div>
+              </div>
+                </React.Fragment>
+              );
+            })
           )}
           <div ref={messagesEndRef} />
+          
+          {/* Scroll to bottom button - positioned at bottom of messages container */}
+          {showScrollToBottom && (
+            <div className="sticky bottom-4 right-4 z-20 flex justify-end">
+              <Button
+                onClick={handleScrollToBottom}
+                size="sm"
+                variant="ghost"
+                className="rounded-full w-8 h-8 text-[#0e9591] hover:bg-transparent hover:animate-none transition-all duration-200 hover:scale-110"
+                style={{
+                  animation: 'slowBounce 2s infinite'
+                }}
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
+
+
       {/* Fixed Footer - Message Input Section */}
-      <div className="p-4 border-t border-border bg-card flex-shrink-0 z-10">
-        {/* Scroll to bottom button - positioned above the separator line */}
-        {showScrollToBottom && (
-          <div className="flex justify-end mb-2">
-            <Button
-              onClick={handleScrollToBottom}
-              size="sm"
-              className="rounded-full w-8 h-8 bg-[#0e9591] hover:bg-[#0e9591]/90 text-white shadow-lg hover:animate-none transition-all duration-200 hover:scale-110"
-              style={{
-                animation: 'slowBounce 2s infinite'
-              }}
-            >
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
-        
+      <div className="p-4 border-t border-border bg-card flex-shrink-0 z-50 md:relative md:bottom-auto fixed bottom-0 left-0 right-0 md:static">
         <div className="flex space-x-2">
           <Input
             ref={inputRef}
@@ -562,7 +692,7 @@ export const ConversationView = ({
           <Button 
             onClick={sendMessage} 
             disabled={!newMessage.trim() || sending}
-            className="bg-[#0e9591] hover:bg-[#0e9591]/90"
+            className="bg-[#054a4a] hover:bg-[#054a4a]/90"
           >
             <Send className="h-4 w-4" />
           </Button>

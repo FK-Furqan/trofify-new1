@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
@@ -9,12 +9,19 @@ import { Badge } from "./ui/badge";
 import { X, Upload, Image as ImageIcon, Video, Smile, MapPin, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { getBackendUrl } from "@/lib/utils";
+import { UserMentionInput } from "./UserMentionInput";
+import { VideoTrimmer } from "./VideoTrimmer";
 
-export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenChange }) => {
-  console.log('CreatePost rendered with props:', { user: !!user, open: controlledOpen, onOpenChange: !!onOpenChange });
+interface CreatePostProps {
+  user: any;
+  onPostCreated: (post?: any) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export const CreatePost = React.memo(({ user, onPostCreated, open: controlledOpen, onOpenChange }: CreatePostProps) => {
   
   if (!user) {
-    console.log('CreatePost: No user provided, returning null');
     return null;
   }
 
@@ -23,6 +30,9 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
   const [previews, setPreviews] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [taggedUsers, setTaggedUsers] = useState<any[]>([]);
+  const [videoToTrim, setVideoToTrim] = useState<File | null>(null);
+  const [showVideoTrimmer, setShowVideoTrimmer] = useState(false);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
@@ -52,7 +62,7 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
     }
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files ? Array.from(event.target.files) : [];
     const validTypes = [
       // Images
@@ -77,8 +87,7 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
       'video/3gpp',
       'video/3gpp2'
     ];
-    const newFiles: File[] = [];
-    const newPreviews: string[] = [];
+    
     for (const file of files) {
       if (!validTypes.includes(file.type)) {
         toast.error(`Unsupported file type: ${file.type}. Please select a valid image or video file.`);
@@ -88,11 +97,36 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
         toast.error("File size must be less than 50MB");
         continue;
       }
-      newFiles.push(file);
-      newPreviews.push(URL.createObjectURL(file));
+
+      // Check if it's a video and needs trimming
+      if (file.type.startsWith('video/')) {
+        const duration = await getVideoDuration(file);
+        if (duration > 20) {
+          // Video is longer than 20 seconds, show trimmer
+          setVideoToTrim(file);
+          setShowVideoTrimmer(true);
+          continue;
+        }
+      }
+
+      // Add file directly if it's an image or short video
+      setSelectedFiles((prev) => [...prev, file]);
+      setPreviews((prev) => [...prev, URL.createObjectURL(file)]);
     }
-    setSelectedFiles((prev) => [...prev, ...newFiles]);
-    setPreviews((prev) => [...prev, ...newPreviews]);
+  };
+
+  const getVideoDuration = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        resolve(video.duration);
+      };
+      video.onerror = () => {
+        resolve(0); // Default to 0 if we can't get duration
+      };
+      video.src = URL.createObjectURL(file);
+    });
   };
 
   const removeFile = (idx: number) => {
@@ -106,6 +140,18 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
     }
   };
 
+  const handleVideoTrimmed = (trimmedFile: File) => {
+    setSelectedFiles((prev) => [...prev, trimmedFile]);
+    setPreviews((prev) => [...prev, URL.createObjectURL(trimmedFile)]);
+    setVideoToTrim(null);
+    setShowVideoTrimmer(false);
+  };
+
+  const handleVideoTrimCancel = () => {
+    setVideoToTrim(null);
+    setShowVideoTrimmer(false);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!content.trim() && selectedFiles.length === 0) {
@@ -114,8 +160,10 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
     }
     setUploading(true);
     try {
-      let imageUrls: string[] = [];
-      // Upload all images if selected
+      let mediaUrls: string[] = [];
+      let mediaTypes: string[] = [];
+      
+      // Upload all media files
       for (const file of selectedFiles) {
         const formData = new FormData();
         formData.append('file', file);
@@ -128,13 +176,17 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
           throw new Error('Failed to upload media');
         }
         const uploadData = await uploadResponse.json();
-        imageUrls.push(uploadData.url);
+        mediaUrls.push(uploadData.url);
+        mediaTypes.push(file.type.startsWith('video/') ? 'video' : 'image');
       }
+      
       // Create post record
       const postData = {
         user_id: user.id,
         description: content.trim(),
-        images: imageUrls,
+        images: mediaUrls,
+        media_types: mediaTypes, // Add media types for proper rendering
+        taggedUsers: taggedUsers,
       };
       const createResponse = await fetch(`${getBackendUrl()}/api/posts`, {
         method: 'POST',
@@ -152,6 +204,7 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
       previews.forEach((url) => URL.revokeObjectURL(url));
       setSelectedFiles([]);
       setPreviews([]);
+      setTaggedUsers([]);
       onOpenChange(false);
       if (onPostCreated) {
         onPostCreated(newPost);
@@ -165,13 +218,13 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
     }
   };
 
-  return (
+    return (
     <Dialog open={controlledOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto z-50 w-[calc(100vw-2rem)] sm:w-auto mx-auto sm:mx-0 rounded-lg sm:rounded-lg left-1/2 sm:left-[50%] -translate-x-1/2 sm:translate-x-[-50%]">
         <DialogHeader>
           <DialogTitle>Create Post</DialogTitle>
           <DialogDescription>
-            Share what's on your mind with TrofiFy community
+            Share what's on your mind with Trofify community
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -182,17 +235,19 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
               <AvatarFallback>U</AvatarFallback>
             </Avatar>
             <div>
-              <p className="font-medium text-sm">{user.display_name || user.email}</p>
-              <p className="text-xs text-muted-foreground">Posting to timeline</p>
+                          <p className="trofify-profile-name">{user.display_name || user.email}</p>
+            <p className="trofify-time">Posting to timeline</p>
             </div>
           </div>
-          {/* Content Input */}
-          <Textarea
-            placeholder="What's happening in your sports world?"
+          {/* Content Input with User Mentions */}
+          <UserMentionInput
             value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="min-h-[100px] resize-none border-none focus:ring-0 text-lg placeholder:text-muted-foreground"
-            disabled={uploading}
+            onChange={setContent}
+            placeholder="What's happening in your sports world?"
+            className="min-h-[100px] resize-none border-none focus:ring-0 placeholder:text-muted-foreground trofify-caption text-lg"
+            onTaggedUsersChange={setTaggedUsers}
+            maxTags={10}
+            currentUserId={user.id}
           />
           {/* File Previews */}
           {previews.length > 0 && (
@@ -200,36 +255,46 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
               <CardContent className="p-2 flex gap-2 overflow-x-auto">
                 {previews.map((preview, idx) => (
                   <div key={idx} className="relative w-32 h-32 flex-shrink-0">
-                    <img 
-                      src={preview} 
-                      alt={`Preview ${idx + 1}`}
-                      className="w-full h-full object-contain rounded-lg border"
-                    />
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    className="absolute top-2 right-2"
+                    {selectedFiles[idx]?.type.startsWith('video/') ? (
+                      <video 
+                        src={preview} 
+                        className="w-full h-full object-contain rounded-lg border"
+                        muted
+                        playsInline
+                        preload="metadata"
+                      />
+                    ) : (
+                      <img 
+                        src={preview} 
+                        alt={`Preview ${idx + 1}`}
+                        className="w-full h-full object-contain rounded-lg border"
+                      />
+                    )}
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      className="absolute top-2 right-2"
                       onClick={() => removeFile(idx)}
-                    disabled={uploading}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
+                      disabled={uploading}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 ))}
               </CardContent>
             </Card>
           )}
           {/* Action Buttons */}
-          <div className="flex items-center justify-between pt-3 border-t">
-            <div className="flex items-center space-x-3">
+          <div className="flex flex-col sm:flex-row items-center gap-3 pt-3 border-t">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="text-[#0e9591] hover:text-[#087a74]"
+                className="text-[#0e9591] hover:text-[#087a74] flex-1 sm:flex-none"
               >
                 <Upload className="h-4 w-4 mr-1" />
                 Media
@@ -240,7 +305,7 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
                 size="sm"
                 onClick={handleCameraClick}
                 disabled={uploading}
-                className="text-[#0e9591] hover:text-[#087a74]"
+                className="text-[#0e9591] hover:text-[#087a74] flex-1 sm:flex-none"
               >
                 <Camera className="h-4 w-4 mr-1" />
                 Camera
@@ -265,19 +330,20 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
                 disabled={uploading}
               />
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <Button 
                 type="button" 
                 variant="outline" 
                 onClick={() => onOpenChange(false)}
                 disabled={uploading}
+                className="flex-1 sm:flex-none"
               >
                 Cancel
               </Button>
               <Button 
                 type="submit" 
                 disabled={uploading || (!content.trim() && selectedFiles.length === 0)}
-                className="bg-[#0e9591] hover:bg-[#0c7b77] text-white"
+                className="bg-[#0e9591] hover:bg-[#0c7b77] text-white flex-1 sm:flex-none"
               >
                 {uploading ? "Posting..." : "Post"}
               </Button>
@@ -285,6 +351,17 @@ export const CreatePost = ({ user, onPostCreated, open: controlledOpen, onOpenCh
           </div>
         </form>
       </DialogContent>
+
+      {/* Video Trimmer */}
+      {videoToTrim && (
+        <VideoTrimmer
+          file={videoToTrim}
+          onTrimmed={handleVideoTrimmed}
+          onCancel={handleVideoTrimCancel}
+          open={showVideoTrimmer}
+          onOpenChange={setShowVideoTrimmer}
+        />
+      )}
     </Dialog>
   );
-};
+});

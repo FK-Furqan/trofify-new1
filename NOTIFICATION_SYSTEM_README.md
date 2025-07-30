@@ -2,7 +2,7 @@
 
 ## Overview
 
-A comprehensive notification system has been implemented for the TrofiFy application that provides real-time notifications for user interactions like likes and comments on posts.
+A comprehensive notification system has been implemented for the Trofify application that provides real-time notifications for user interactions like likes and comments on posts.
 
 ## Features Implemented
 

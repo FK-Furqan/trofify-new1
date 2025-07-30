@@ -361,9 +361,9 @@ export const StoryViewer = ({
               size="sm"
               onClick={() => handleLikeToggle(currentStory.id)}
               disabled={isLiking}
-                              className={`text-white hover:bg-white/20 ${isLiked ? 'text-[#0e9591]' : ''}`}
+                              className={`text-white hover:bg-white/20 ${isLiked ? 'text-red-500' : ''}`}
             >
-              <Heart className={`h-5 w-5 ${isLiked ? 'fill-current' : ''}`} />
+              <Heart className={`h-5 w-5 ${isLiked ? 'fill-red-500 stroke-red-500' : 'stroke-white'}`} />
             </Button>
             {likeCount > 0 && (
               <span className="text-white text-sm font-medium">{likeCount}</span>

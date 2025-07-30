@@ -4,8 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { getBackendUrl } from "@/lib/utils";
@@ -25,15 +23,7 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
     confirmPassword: "",
     venueName: "",
     venueType: "",
-    address: "",
-    city: "",
-    state: "",
-    zipCode: "",
-    phoneNumber: "",
-    website: "",
-    facilities: [] as string[],
-    capacity: "",
-    description: ""
+    phoneNumber: ""
   });
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -44,21 +34,6 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
     "Basketball Court", "Soccer Field", "Baseball Field", "Golf Course",
     "Boxing Gym", "Martial Arts Dojo", "Dance Studio", "Other"
   ];
-
-  const facilityOptions = [
-    "Parking", "Locker Rooms", "Equipment Rental", "Pro Shop",
-    "Cafeteria/Snack Bar", "First Aid", "Wi-Fi", "Air Conditioning",
-    "Spectator Seating", "Audio/Visual Equipment", "Lighting", "Accessibility Features"
-  ];
-
-  const handleFacilityToggle = (facility: string) => {
-    setFormData(prev => ({
-      ...prev,
-      facilities: prev.facilities.includes(facility)
-        ? prev.facilities.filter(f => f !== facility)
-        : [...prev.facilities, facility]
-    }));
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,19 +67,11 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
           confirmPassword: "",
           venueName: "",
           venueType: "",
-          address: "",
-          city: "",
-          state: "",
-          zipCode: "",
-          phoneNumber: "",
-          website: "",
-          facilities: [],
-          capacity: "",
-          description: ""
+          phoneNumber: ""
         });
         toast({
           title: "Success!",
-          description: "Venue account created successfully!",
+          description: "Venue account created successfully! Complete your profile to get started.",
           variant: "success"
         });
         onSuccess(formData.email);
@@ -117,15 +84,7 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
           confirmPassword: "",
           venueName: "",
           venueType: "",
-          address: "",
-          city: "",
-          state: "",
-          zipCode: "",
-          phoneNumber: "",
-          website: "",
-          facilities: [],
-          capacity: "",
-          description: ""
+          phoneNumber: ""
         });
         toast({
           title: "Signup Failed",
@@ -142,15 +101,7 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
         confirmPassword: "",
         venueName: "",
         venueType: "",
-        address: "",
-        city: "",
-        state: "",
-        zipCode: "",
-        phoneNumber: "",
-        website: "",
-        facilities: [],
-        capacity: "",
-        description: ""
+        phoneNumber: ""
       });
       toast({
         title: "Network Error",
@@ -165,7 +116,7 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
   return (
     <div className={loading ? "opacity-50 pointer-events-none transition-opacity duration-300" : "transition-opacity duration-300"}>
       {success && (
-        <div className="mb-4 p-3 rounded bg-green-100 text-green-800 text-center font-semibold">
+        <div className="mb-4 p-3 rounded bg-green-600 text-white text-center font-semibold">
           Venue account created successfully!
         </div>
       )}
@@ -173,26 +124,26 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
         <Button variant="ghost" size="sm" onClick={onBack} className="mr-2">
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h3 className="text-lg font-semibold">Venue Owner Registration</h3>
+        <h3 className="text-lg font-semibold">Venue Registration</h3>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="venue-displayName">Display Name</Label>
             <Input
               id="venue-displayName"
-              placeholder="Enter your display name"
+              placeholder="Enter display name for your venue"
               value={formData.displayName}
               onChange={(e) => setFormData(prev => ({ ...prev, displayName: e.target.value }))}
               required
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="venue-ownerName">Owner/Manager Name</Label>
+            <Label htmlFor="venue-ownerName">Owner Name</Label>
             <Input
               id="venue-ownerName"
-              placeholder="Enter your full name"
+              placeholder="Enter owner's full name"
               value={formData.ownerName}
               onChange={(e) => setFormData(prev => ({ ...prev, ownerName: e.target.value }))}
               required
@@ -200,7 +151,7 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="venue-email">Email</Label>
             <Input
@@ -212,9 +163,7 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
               required
             />
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="venue-password">Password</Label>
             <div className="relative">
@@ -251,7 +200,7 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="venue-venueName">Venue Name</Label>
             <Input
@@ -279,112 +228,21 @@ export const VenueSignupForm = ({ onSuccess, onBack }: VenueSignupFormProps) => 
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="venue-address">Street Address</Label>
+          <Label htmlFor="venue-phoneNumber">Phone Number</Label>
           <Input
-            id="venue-address"
-            placeholder="Enter street address"
-            value={formData.address}
-            onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
+            id="venue-phoneNumber"
+            type="tel"
+            placeholder="Enter phone number"
+            value={formData.phoneNumber}
+            onChange={(e) => setFormData(prev => ({ ...prev, phoneNumber: e.target.value }))}
             required
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="venue-city">City</Label>
-            <Input
-              id="venue-city"
-              placeholder="Enter city"
-              value={formData.city}
-              onChange={(e) => setFormData(prev => ({ ...prev, city: e.target.value }))}
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="venue-state">State</Label>
-            <Input
-              id="venue-state"
-              placeholder="Enter state"
-              value={formData.state}
-              onChange={(e) => setFormData(prev => ({ ...prev, state: e.target.value }))}
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="venue-zipCode">ZIP Code</Label>
-            <Input
-              id="venue-zipCode"
-              placeholder="Enter ZIP code"
-              value={formData.zipCode}
-              onChange={(e) => setFormData(prev => ({ ...prev, zipCode: e.target.value }))}
-              required
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="venue-phoneNumber">Phone Number</Label>
-            <Input
-              id="venue-phoneNumber"
-              type="tel"
-              placeholder="Enter phone number"
-              value={formData.phoneNumber}
-              onChange={(e) => setFormData(prev => ({ ...prev, phoneNumber: e.target.value }))}
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="venue-website">Website (Optional)</Label>
-            <Input
-              id="venue-website"
-              type="url"
-              placeholder="Enter website URL"
-              value={formData.website}
-              onChange={(e) => setFormData(prev => ({ ...prev, website: e.target.value }))}
-            />
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="venue-capacity">Capacity</Label>
-          <Input
-            id="venue-capacity"
-            type="number"
-            placeholder="Maximum capacity (number of people)"
-            value={formData.capacity}
-            onChange={(e) => setFormData(prev => ({ ...prev, capacity: e.target.value }))}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label>Available Facilities (Select all that apply)</Label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto">
-            {facilityOptions.map((facility) => (
-              <div key={facility} className="flex items-center space-x-2">
-                <Checkbox
-                  id={facility}
-                  checked={formData.facilities.includes(facility)}
-                  onCheckedChange={() => handleFacilityToggle(facility)}
-                />
-                <Label htmlFor={facility} className="text-sm">{facility}</Label>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="venue-description">Description</Label>
-          <Textarea
-            id="venue-description"
-            placeholder="Describe your venue, services offered, special features..."
-            value={formData.description}
-            onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-            rows={3}
-          />
+        <div className="bg-blue-50 dark:bg-blue-950/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+          <p className="text-sm text-blue-700 dark:text-blue-300">
+            💡 <strong>Quick Setup:</strong> You can complete your venue details, address, facilities, and other information in your profile after signing up.
+          </p>
         </div>
 
         <Button type="submit" className="w-full" disabled={loading}>

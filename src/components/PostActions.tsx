@@ -74,6 +74,7 @@ export const PostActions = ({
 
   useEffect(() => {
     // Set initial states from props
+    console.log('PostActions: Setting initial liked state to:', initialLiked);
     setLiked(initialLiked);
     setSaved(initialSaved);
     setLikes(initialLikes);
@@ -83,7 +84,7 @@ export const PostActions = ({
     // Set loading to false since we have initial data
     setLoading(false);
     // eslint-disable-next-line
-  }, [postId, userId, initialLiked, initialSaved, initialLikes, initialComments, initialShares]);
+  }, [initialLiked, initialSaved, initialLikes, initialComments, initialShares]);
 
   // Listen for save changes from other components
   useEffect(() => {
@@ -107,7 +108,6 @@ export const PostActions = ({
       console.warn('Like action blocked: invalid userId', userId);
       return;
     }
-    console.log('Liking/unliking post', postId, 'as user', userId);
     if (!liked) {
       setLiked(true);
       setLikes(l => l + 1);
@@ -153,7 +153,6 @@ export const PostActions = ({
       console.warn('Save action blocked: invalid userId', userId);
       return;
     }
-    console.log('Saving/unsaving post', postId, 'as user', userId);
     if (!saved) {
       setSaved(true);
       try {
@@ -205,13 +204,13 @@ export const PostActions = ({
           size="sm"
           disabled={loading}
           onClick={async () => { if (!loading) { try { await handleLike(); } catch (e) { console.error(e); } } }}
-          className={`px-4 py-2 transform -skew-x-12 ${liked && !loading ? "bg-[#0e9591]/20 text-[#0e9591]" : "bg-[#0e9591]/10 text-[#0e9591] hover:bg-[#0e9591]/20"}`}
+          className={`px-4 py-2 transform -skew-x-12 ${liked && !loading ? "bg-red-500/20 text-red-500" : "bg-red-500/10 text-red-500 hover:bg-red-500/20"}`}
         >
           <div className="transform skew-x-12 flex items-center">
             <Heart
-              className={`h-4 w-4 mr-2 transition-colors duration-150 ${liked && !loading ? "fill-[#0e9591] stroke-[#0e9591]" : "stroke-[#0e9591]"}`}
-              fill={loading ? "none" : liked ? "#0e9591" : "none"}
-              stroke={loading ? "#0e9591" : liked ? "#0e9591" : "#0e9591"}
+              className={`h-4 w-4 mr-2 transition-colors duration-150 ${liked && !loading ? "fill-red-500 stroke-red-500" : "stroke-red-500"}`}
+              fill={loading ? "none" : liked ? "#ef4444" : "none"}
+              stroke={loading ? "#ef4444" : liked ? "#ef4444" : "#ef4444"}
             />
             {likes}
           </div>

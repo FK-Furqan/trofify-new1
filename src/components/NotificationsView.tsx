@@ -39,7 +39,6 @@ export const NotificationsView = ({
     }
   };
     const handleNotificationClick = async (notification: any) => {
-    console.log('Notification clicked:', notification);
     
     // Mark notification as read if it's unread
     if (notification.is_read === false) {
@@ -60,21 +59,18 @@ export const NotificationsView = ({
     
     // Handle post notifications
     if (notification.post_id && onNavigateToPost) {
-      console.log('Navigating to post:', notification.post_id);
       onNavigateToPost(notification.post_id);
       return;
     }
     
     // Handle support notifications - navigate to supporter's profile
     if (notification.type === 'support' && notification.actor_id && onProfileClick) {
-      console.log('Support notification clicked, navigating to supporter profile:', notification.actor_id);
       setLoadingProfile(notification.actor_id);
       try {
         // Fetch the supporter's complete profile data
         const response = await fetch(`${getBackendUrl()}/api/users/${notification.actor_id}`);
         if (response.ok) {
           const supporterProfile = await response.json();
-          console.log('Support notification: Navigating to supporter profile:', supporterProfile);
           onProfileClick(supporterProfile);
         } else {
           console.error('Failed to fetch supporter profile, using fallback');

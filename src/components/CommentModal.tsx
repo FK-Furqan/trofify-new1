@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { getBackendUrl } from "@/lib/utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { UniversalLoader } from "@/components/ui/universal-loader";
+import { UserMentionInput } from "./UserMentionInput";
+import { CompactTaggedUsersRenderer } from "./TaggedUsersRenderer";
 
 interface CommentModalProps {
   open: boolean;
@@ -27,6 +29,7 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   const commentsContainerRef = useRef<HTMLDivElement>(null);
   const [isScrollable, setIsScrollable] = useState(false);
+  const [taggedUsers, setTaggedUsers] = useState<any[]>([]);
 
   useEffect(() => {
     setIsMobile(window.innerWidth <= 768);
@@ -63,8 +66,13 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
     if (!commentText.trim()) return;
     try {
       // Use user_id (snake_case) to match backend
-      await axios.post(`${getBackendUrl()}/api/posts/${postId}/comments`, { user_id: userId, comment: commentText });
+      await axios.post(`${getBackendUrl()}/api/posts/${postId}/comments`, { 
+        user_id: userId, 
+        comment: commentText,
+        taggedUsers: taggedUsers 
+      });
       setCommentText("");
+      setTaggedUsers([]);
       await fetchComments();
       if (onCommentAdded) onCommentAdded();
     } catch (e) { console.error('Failed to add comment:', e); }
@@ -170,8 +178,8 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
         ) : comments.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
             <svg width="64" height="64" fill="none"><rect width="64" height="64" rx="16" fill="currentColor" opacity="0.1"/><text x="32" y="38" textAnchor="middle" fontSize="14" fill="currentColor" opacity="0.5">💬</text></svg>
-            <div className="mt-2 font-semibold">No comments yet</div>
-            <div className="text-sm">Be the first to comment.</div>
+                          <div className="mt-2 trofify-header">No comments yet</div>
+              <div className="trofify-caption">Be the first to comment.</div>
           </div>
         ) : (
           comments.map(comment => {
@@ -190,17 +198,22 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
                 </Avatar>
                 <div className="flex-1">
                   <div 
-                    className="font-semibold text-sm cursor-pointer hover:underline text-[#0e9591]"
+                    className="trofify-profile-name cursor-pointer hover:underline text-[#0e9591]"
                     onClick={() => handleAvatarClick(comment)}
                   >
                     {getDisplayName(comment)}
                   </div>
-                  <div className={isExpanded ? "text-foreground text-sm" : "text-foreground text-sm line-clamp-4"}>
-                    {comment.comment}
+                  <div className={isExpanded ? "trofify-comment" : "trofify-comment line-clamp-4"}>
+                    <CompactTaggedUsersRenderer
+                      text={comment.comment}
+                      taggedUsers={comment.tagged_users || []}
+                      onUserClick={onProfileClick}
+                      variant="compact"
+                    />
                   </div>
                   {!isExpanded && comment.comment && comment.comment.split(/\r?\n| /).length > 20 && (
                     <button
-                      className="text-xs text-[#0e9591] font-semibold mt-1 focus:outline-none"
+                      className="trofify-label text-[#0e9591] font-trofify-semibold mt-1 focus:outline-none"
                       onClick={() => setExpandedComments(prev => ({ ...prev, [comment.id]: true }))}
                     >
                       Read more
@@ -208,13 +221,13 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
                   )}
                   {isExpanded && comment.comment && comment.comment.split(/\r?\n| /).length > 20 && (
                     <button
-                      className="text-xs text-[#0e9591] font-semibold mt-1 focus:outline-none"
+                      className="trofify-label text-[#0e9591] font-trofify-semibold mt-1 focus:outline-none"
                       onClick={() => setExpandedComments(prev => ({ ...prev, [comment.id]: false }))}
                     >
                       Show less
                     </button>
                   )}
-                  <div className="text-xs text-muted-foreground">{comment.created_at ? new Date(comment.created_at).toLocaleString() : ''}</div>
+                  <div className="trofify-time">{comment.created_at ? new Date(comment.created_at).toLocaleString() : ''}</div>
                 </div>
                 {comment.user_id === userId && !isMobile && (
                   <Button size="icon" variant="ghost" onClick={() => handleDeleteComment(comment.id)} title="Delete comment">
@@ -229,16 +242,19 @@ export function CommentModal({ open, onOpenChange, postId, userId, onCommentAdde
     );
   };
   const renderInput = () => (
-    <div className="flex items-center border-t border-border p-2 bg-background">
-      <input
-        type="text"
+    <div className="flex flex-col border-t border-border p-2 bg-background">
+      <UserMentionInput
         value={commentText}
-        onChange={e => setCommentText(e.target.value)}
+        onChange={setCommentText}
         placeholder="Write a comment..."
-        className="flex-1 border border-border bg-card text-foreground rounded px-3 py-2 mr-2 placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#0e9591] focus:border-transparent"
-        onKeyDown={e => e.key === "Enter" && handleAddComment()}
+        className="flex-1 border border-border bg-card rounded px-3 py-2 mb-2 placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#0e9591] focus:border-transparent trofify-input"
+        onTaggedUsersChange={setTaggedUsers}
+        maxTags={5}
+        currentUserId={userId}
       />
-      <Button onClick={handleAddComment} disabled={!commentText.trim()} className="bg-[#0e9591] text-white hover:bg-[#087a74]">Post</Button>
+      <div className="flex justify-end">
+        <Button onClick={handleAddComment} disabled={!commentText.trim()} className="bg-[#0e9591] text-white hover:bg-[#087a74]">Post</Button>
+      </div>
     </div>
   );
   if (isMobile) {

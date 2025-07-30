@@ -1,7 +1,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trophy, Users, Heart, MapPin, Building } from "lucide-react";
+import { Trophy, Users, Heart, MapPin, Building, Camera, GraduationCap } from "lucide-react";
 import { UserCategory } from "../AuthSystem";
 
 interface SignupCategorySelectionProps {
@@ -44,14 +44,28 @@ export const SignupCategorySelection = ({ onSelectCategory }: SignupCategorySele
       description: "Sports equipment or clothing brand",
       icon: Building,
       color: "from-orange-500 to-orange-600"
+    },
+    {
+      id: "media_creator" as UserCategory,
+      title: "Media/Creator",
+      description: "Content creator, photographer, or sports media",
+      icon: Camera,
+      color: "from-pink-500 to-pink-600"
+    },
+    {
+      id: "organization_institute" as UserCategory,
+      title: "Organization/Institute",
+      description: "Sports organization, school, or training institute",
+      icon: GraduationCap,
+      color: "from-indigo-500 to-indigo-600"
     }
   ];
 
   return (
     <div className="space-y-4">
       <div className="text-center mb-6">
-        <h3 className="text-lg font-semibold mb-2">Choose Your Category</h3>
-        <p className="text-sm text-gray-600">Select the option that best describes you</p>
+        <h3 className="text-lg font-semibold mb-2 text-white">Choose Your Category</h3>
+        <p className="text-sm text-gray-300">Select the option that best describes you</p>
       </div>
       
       <div className="grid gap-3">
@@ -67,8 +81,8 @@ export const SignupCategorySelection = ({ onSelectCategory }: SignupCategorySele
                   <category.icon className="h-6 w-6 text-white" />
                 </div>
                 <div className="flex-1">
-                  <h4 className="font-semibold text-gray-900">{category.title}</h4>
-                  <p className="text-sm text-gray-600">{category.description}</p>
+                  <h4 className="font-semibold text-white">{category.title}</h4>
+                  <p className="text-sm text-gray-300">{category.description}</p>
                 </div>
               </div>
             </CardContent>

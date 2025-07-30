@@ -565,21 +565,88 @@ app.post('/api/upload/story-media', upload.single('file'), async (req, res) => {
 // Create a new post
 app.post('/api/posts', async (req, res) => {
   try {
-    const { user_id, media_url, media_type, description, images } = req.body;
+    const { user_id, media_url, media_type, description, images, media_types, taggedUsers } = req.body;
+    
+    // Validate user_id
+    if (!user_id) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    // Handle temporary user IDs for development/testing
+    let actualUserId = user_id;
+    if (user_id.startsWith('temp-')) {
+      // For temporary IDs, try to find a default user or create one
+      const { data: defaultUser, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .limit(1)
+        .single();
+      
+      if (userError || !defaultUser) {
+        return res.status(400).json({ error: 'No valid user found. Please sign up first.' });
+      }
+      
+      actualUserId = defaultUser.id;
+      console.log(`Using default user ID ${actualUserId} for temporary ID ${user_id}`);
+    } else {
+      // Validate UUID format for real user IDs
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(user_id)) {
+        return res.status(400).json({ error: 'Invalid user ID format' });
+      }
+    }
     let insertData = {
-      user_id,
-      description
+      user_id: actualUserId,
+      description,
+      created_at: new Date().toISOString() // Explicitly set the current timestamp in UTC
     };
     if (Array.isArray(images) && images.length > 0) {
       insertData.images = images;
+      // Store media types as metadata in the images array
+      if (Array.isArray(media_types) && media_types.length === images.length) {
+        const imagesWithTypes = images.map((url, index) => ({
+          url: url,
+          type: media_types[index] || 'image'
+        }));
+        insertData.images = imagesWithTypes;
+      }
     } else {
       insertData.media_url = media_url;
       insertData.media_type = media_type;
     }
-    const { data, error } = await supabase.from('posts').insert(insertData).select().single();
+    
+    // Create the post
+    const { data: post, error } = await supabase.from('posts').insert(insertData).select().single();
     if (error) throw error;
-    res.json(data);
+
+    // Handle user tagging if provided
+    if (taggedUsers && Array.isArray(taggedUsers) && taggedUsers.length > 0) {
+      // Extract user IDs from tagged users
+      const taggedUserIds = taggedUsers.map(user => user.id);
+      
+      // Create post tags
+      const postTags = taggedUserIds.map(taggedUserId => ({
+        post_id: post.id,
+        tagged_user_id: taggedUserId,
+        tagged_by: actualUserId
+      }));
+
+      const { error: tagError } = await supabase
+        .from('post_tags')
+        .insert(postTags);
+
+      if (tagError) {
+        console.error('Error creating post tags:', tagError);
+      } else {
+        // Create notifications for tagged users
+        await createTagNotifications(post.id, taggedUserIds, actualUserId);
+      }
+    }
+
+    res.json(post);
   } catch (error) {
+    console.error('Error creating post:', error);
+    console.error('Request body:', req.body);
     res.status(500).json({ error: error.message });
   }
 });
@@ -670,12 +737,26 @@ app.get('/api/posts', async (req, res) => {
           isSaved = !!saveData;
         }
 
+        // Get tagged users for this post
+        const { data: taggedUsersData, error: taggedError } = await supabase
+          .from('post_tags')
+          .select(`
+            tagged_user:users!post_tags_tagged_user_id_fkey(
+              id, display_name, email, avatar, user_type
+            )
+          `)
+          .eq('post_id', post.id);
+
+        const taggedUsers = taggedError ? [] : 
+          taggedUsersData.map(item => item.tagged_user).filter(Boolean);
+
         return {
           ...post,
           users: {
             ...user,
             sport: sport
           },
+          tagged_users: taggedUsers,
           likes_count: likesCount || 0,
           comments_count: commentsCount || 0,
           shares_count: sharesCount || 0,
@@ -688,6 +769,117 @@ app.get('/api/posts', async (req, res) => {
     res.json(postsWithUsers);
   } catch (error) {
     console.error('Posts fetch error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get recent posts from users that the current user supports
+app.get('/api/posts/recent', async (req, res) => {
+  try {
+    const currentUserId = req.query.user_id;
+    const limit = parseInt(req.query.limit) || 3;
+    
+    if (!currentUserId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    // Calculate the date 24 hours ago
+    const oneDayAgo = new Date();
+    oneDayAgo.setHours(oneDayAgo.getHours() - 24);
+
+    // First, get the list of users that the current user supports
+    const { data: supportedUsers, error: supportsError } = await supabase
+      .from('supports')
+      .select('supported_id')
+      .eq('supporter_id', currentUserId);
+
+    if (supportsError) throw supportsError;
+
+    // If user doesn't support anyone, return empty array
+    if (!supportedUsers || supportedUsers.length === 0) {
+      return res.json([]);
+    }
+
+    // Extract the supported user IDs
+    const supportedUserIds = supportedUsers.map(support => support.supported_id);
+
+    // Get recent posts from supported users (only from the last 24 hours)
+    const { data: posts, error: postsError } = await supabase
+      .from('posts')
+      .select('*')
+      .in('user_id', supportedUserIds)
+      .gte('created_at', oneDayAgo.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (postsError) throw postsError;
+
+    // If no posts found, return empty array
+    if (!posts || posts.length === 0) {
+      return res.json([]);
+    }
+
+    // Get user info and supporter count for each post
+    const postsWithUsers = await Promise.all(
+      posts.map(async (post) => {
+        const { data: user, error: userError } = await supabase
+          .from('users')
+          .select('id, display_name, email, user_type, avatar')
+          .eq('id', post.user_id)
+          .single();
+
+        if (userError || !user) {
+          return {
+            ...post,
+            author: { display_name: 'Unknown User', email: 'unknown@example.com', avatar: '/placeholder.svg', user_type: 'athlete' },
+            supporter_count: 0
+          };
+        }
+
+        // Get sport information from type-specific table
+        let sport = null;
+        if (user.user_type === 'athlete') {
+          const { data: athleteData } = await supabase
+            .from('athletes')
+            .select('sport')
+            .eq('user_id', user.id)
+            .single();
+          sport = athleteData?.sport;
+        } else if (user.user_type === 'coach') {
+          const { data: coachData } = await supabase
+            .from('coaches')
+            .select('sport')
+            .eq('user_id', user.id)
+            .single();
+          sport = coachData?.sport;
+        }
+
+        // Get supporter count for the post author
+        const { count: supporterCount } = await supabase
+          .from('supports')
+          .select('*', { count: 'exact', head: true })
+          .eq('supported_id', post.user_id);
+
+        return {
+          ...post,
+          author: {
+            ...user,
+            sport: sport
+          },
+          supporter_count: supporterCount || 0
+        };
+      })
+    );
+
+    // Debug: Log the results
+    console.log('Recent posts API called with user_id:', currentUserId);
+    console.log('Supported user IDs:', supportedUserIds);
+    console.log('Posts found:', posts.length);
+    console.log('Posts with users:', postsWithUsers.length);
+
+    res.json(postsWithUsers);
+  } catch (error) {
+    console.error('Recent posts fetch error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -910,7 +1102,7 @@ app.delete('/api/posts/:post_id/like', async (req, res) => {
 app.post('/api/posts/:post_id/comments', async (req, res) => {
   try {
     const { post_id } = req.params;
-    const { user_id, comment } = req.body;
+    const { user_id, comment, taggedUsers } = req.body;
 
     // Get post owner information
     const { data: postData, error: postError } = await supabase
@@ -938,6 +1130,30 @@ app.post('/api/posts/:post_id/comments', async (req, res) => {
     }).select().single();
 
     if (error) throw error;
+
+    // Handle user tagging in comments if provided
+    if (taggedUsers && Array.isArray(taggedUsers) && taggedUsers.length > 0) {
+      // Extract user IDs from tagged users
+      const taggedUserIds = taggedUsers.map(user => user.id);
+      
+      // Create comment tags
+      const commentTags = taggedUserIds.map(taggedUserId => ({
+        comment_id: data.id,
+        tagged_user_id: taggedUserId,
+        tagged_by: user_id
+      }));
+
+      const { error: tagError } = await supabase
+        .from('comment_tags')
+        .insert(commentTags);
+
+      if (tagError) {
+        console.error('Error creating comment tags:', tagError);
+      } else {
+        // Create notifications for tagged users in comments
+        await createTagNotifications(parseInt(post_id), taggedUserIds, user_id);
+      }
+    }
 
     // Don't create notification if user is commenting on their own post
     if (postData.user_id !== user_id) {
@@ -998,7 +1214,30 @@ app.get('/api/posts/:post_id/comments', async (req, res) => {
       .order('created_at', { ascending: true });
 
     if (error) throw error;
-    res.json(data);
+
+    // Get tagged users for each comment
+    const commentsWithTags = await Promise.all(
+      data.map(async (comment) => {
+        const { data: taggedUsersData, error: taggedError } = await supabase
+          .from('comment_tags')
+          .select(`
+            tagged_user:users!comment_tags_tagged_user_id_fkey(
+              id, display_name, email, avatar, user_type
+            )
+          `)
+          .eq('comment_id', comment.id);
+
+        const taggedUsers = taggedError ? [] : 
+          taggedUsersData.map(item => item.tagged_user).filter(Boolean);
+
+        return {
+          ...comment,
+          tagged_users: taggedUsers
+        };
+      })
+    );
+
+    res.json(commentsWithTags);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1037,6 +1276,86 @@ app.delete('/api/posts/:post_id/save', async (req, res) => {
     if (error) throw error;
     res.json({ message: 'Post unsaved successfully' });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete a post
+app.delete('/api/posts/:post_id', async (req, res) => {
+  try {
+    const { post_id } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    // First, check if the post exists and belongs to the user
+    const { data: post, error: postError } = await supabase
+      .from('posts')
+      .select('user_id')
+      .eq('id', parseInt(post_id))
+      .single();
+
+    if (postError || !post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    if (post.user_id !== userId) {
+      return res.status(403).json({ error: 'You can only delete your own posts' });
+    }
+
+    // Delete related data first (due to foreign key constraints)
+    // Delete post tags
+    await supabase
+      .from('post_tags')
+      .delete()
+      .eq('post_id', parseInt(post_id));
+
+    // Delete comment tags
+    await supabase
+      .from('comment_tags')
+      .delete()
+      .eq('comment_id', (await supabase
+        .from('post_comments')
+        .select('id')
+        .eq('post_id', parseInt(post_id))).data?.map(c => c.id) || []);
+
+    // Delete comments
+    await supabase
+      .from('post_comments')
+      .delete()
+      .eq('post_id', parseInt(post_id));
+
+    // Delete likes
+    await supabase
+      .from('post_likes')
+      .delete()
+      .eq('post_id', parseInt(post_id));
+
+    // Delete saves
+    await supabase
+      .from('post_saves')
+      .delete()
+      .eq('post_id', parseInt(post_id));
+
+    // Delete shares
+    await supabase
+      .from('post_shares')
+      .delete()
+      .eq('post_id', parseInt(post_id));
+
+    // Finally, delete the post itself
+    const { error: deleteError } = await supabase
+      .from('posts')
+      .delete()
+      .eq('id', parseInt(post_id));
+
+    if (deleteError) throw deleteError;
+
+    res.json({ message: 'Post deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting post:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1394,6 +1713,89 @@ app.get('/api/stories/viewed/:viewer_id', async (req, res) => {
 
 // === USER PROFILE ENDPOINTS ===
 
+// Search users (must be before /:user_id route)
+app.get('/api/users/search', async (req, res) => {
+  try {
+    const { q, current_user_id } = req.query;
+    
+    console.log('User search request:', { q, current_user_id });
+    
+    if (!current_user_id) {
+      return res.status(400).json({ error: 'Current user ID is required' });
+    }
+
+    // Skip UUID validation for temporary IDs (for development/testing)
+    if (current_user_id.startsWith('temp-')) {
+      console.log('Skipping UUID validation for temporary user ID');
+    } else {
+      // Validate UUID format
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(current_user_id)) {
+        return res.status(400).json({ error: 'Invalid user ID format' });
+      }
+    }
+
+    let query = supabase
+      .from('users')
+      .select(`
+        id, 
+        display_name, 
+        email, 
+        avatar, 
+        user_type,
+        athletes!fk_athlete_user(sport),
+        coaches!fk_coach_user(sport)
+      `);
+
+    // Only exclude current user if it's a valid UUID
+    if (!current_user_id.startsWith('temp-')) {
+      query = query.neq('id', current_user_id);
+    }
+
+    // If search query is provided, filter by it
+    if (q && q.trim()) {
+      query = query.or(`display_name.ilike.%${q.trim()}%,email.ilike.%${q.trim()}%`);
+    }
+
+    // Limit results and order by display name
+    const { data, error } = await query
+      .order('display_name', { ascending: true })
+      .limit(20);
+
+    if (error) {
+      console.error('Supabase search error:', error);
+      throw error;
+    }
+
+    // Process sport information for each user
+    const processedData = data?.map(user => {
+      let sport = null;
+      
+      // Extract sport from athlete or coach data
+      if (user.athletes && user.athletes.length > 0) {
+        sport = user.athletes[0].sport;
+      } else if (user.coaches && user.coaches.length > 0) {
+        sport = user.coaches[0].sport;
+      }
+      
+      return {
+        id: user.id,
+        display_name: user.display_name,
+        email: user.email,
+        avatar: user.avatar,
+        user_type: user.user_type,
+        sport: sport
+      };
+    }) || [];
+
+    console.log(`Found ${processedData.length} users for query: "${q}"`);
+    res.json(processedData);
+  } catch (error) {
+    console.error('User search error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get user by ID with complete profile data
 app.get('/api/users/:user_id', async (req, res) => {
   try {
@@ -1622,29 +2024,84 @@ app.get('/api/users/:user_id/media', async (req, res) => {
   }
 });
 
-// Search users
-app.get('/api/users/search', async (req, res) => {
-  try {
-    const { q, current_user_id } = req.query;
-    
-    if (!q || !current_user_id) {
-      return res.status(400).json({ error: 'Search query and current user ID are required' });
-    }
 
-    // Search users by display name or email, excluding the current user
+
+// Get tagged users for a post
+app.get('/api/posts/:post_id/tagged-users', async (req, res) => {
+  try {
+    const { post_id } = req.params;
+
     const { data, error } = await supabase
-      .from('users')
-      .select('id, display_name, email, avatar, user_type')
-      .or(`display_name.ilike.%${q}%,email.ilike.%${q}%`)
-      .neq('id', current_user_id)
-      .limit(20);
+      .from('post_tags')
+      .select(`
+        tagged_user:users!post_tags_tagged_user_id_fkey(
+          id, display_name, email, avatar, user_type
+        )
+      `)
+      .eq('post_id', post_id);
 
     if (error) throw error;
-    res.json(data || []);
+
+    const taggedUsers = data.map(item => item.tagged_user).filter(Boolean);
+    res.json(taggedUsers);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
+// Create tag notifications for tagged users
+async function createTagNotifications(postId, taggedUserIds, taggedByUserId) {
+  try {
+    // Get the tagging user's info
+    const { data: taggingUser, error: userError } = await supabase
+      .from('users')
+      .select('id, display_name, email, avatar')
+      .eq('id', taggedByUserId)
+      .single();
+
+    if (userError || !taggingUser) {
+      console.error('Error fetching tagging user:', userError);
+      return;
+    }
+
+    // Create notifications for each tagged user
+    const notifications = taggedUserIds.map(taggedUserId => ({
+      user_id: taggedUserId,
+      actor_id: taggedByUserId,
+      post_id: postId,
+      type: 'tag',
+      message: `${taggingUser.display_name} tagged you in a post`,
+      is_read: false
+    }));
+
+    const { error: notificationError } = await supabase
+      .from('notifications')
+      .insert(notifications);
+
+    if (notificationError) {
+      console.error('Error creating tag notifications:', notificationError);
+      return;
+    }
+
+    // Send real-time notifications via Socket.IO
+    taggedUserIds.forEach(taggedUserId => {
+      io.to(`notifications_${taggedUserId}`).emit('new_notification', {
+        type: 'tag',
+        message: `${taggingUser.display_name} tagged you in a post`,
+        post_id: postId,
+        actor: {
+          id: taggingUser.id,
+          display_name: taggingUser.display_name,
+          avatar: taggingUser.avatar
+        }
+      });
+    });
+
+    console.log(`Created tag notifications for ${taggedUserIds.length} users`);
+  } catch (error) {
+    console.error('Error in createTagNotifications:', error);
+  }
+}
 
 // === NOTIFICATION ENDPOINTS ===
 
@@ -1686,6 +2143,24 @@ app.get('/api/notifications/:user_id', async (req, res) => {
             .single();
 
           if (!ownerError && postOwner) {
+            // Get sport information for post owner
+            let sport = null;
+            if (postOwner.user_type === 'athlete') {
+              const { data: athleteData } = await supabase
+                .from('athletes')
+                .select('sport')
+                .eq('user_id', postOwner.id)
+                .single();
+              if (athleteData) sport = athleteData.sport;
+            } else if (postOwner.user_type === 'coach') {
+              const { data: coachData } = await supabase
+                .from('coaches')
+                .select('sport')
+                .eq('user_id', postOwner.id)
+                .single();
+              if (coachData) sport = coachData.sport;
+            }
+
             return {
               ...notification,
               post: {
@@ -1694,11 +2169,41 @@ app.get('/api/notifications/:user_id', async (req, res) => {
                 author_email: postOwner.email,
                 avatar: postOwner.avatar,
                 user_type: postOwner.user_type,
-                category: postOwner.user_type
+                category: postOwner.user_type,
+                sport: sport
               }
             };
           }
         }
+        
+        // Also get sport information for the actor (notification creator)
+        if (notification.actor) {
+          let actorSport = null;
+          if (notification.actor.user_type === 'athlete') {
+            const { data: athleteData } = await supabase
+              .from('athletes')
+              .select('sport')
+              .eq('user_id', notification.actor.id)
+              .single();
+            if (athleteData) actorSport = athleteData.sport;
+          } else if (notification.actor.user_type === 'coach') {
+            const { data: coachData } = await supabase
+              .from('coaches')
+              .select('sport')
+              .eq('user_id', notification.actor.id)
+              .single();
+            if (coachData) actorSport = coachData.sport;
+          }
+          
+          return {
+            ...notification,
+            actor: {
+              ...notification.actor,
+              sport: actorSport
+            }
+          };
+        }
+        
         return notification;
       })
     );
@@ -1713,6 +2218,12 @@ app.get('/api/notifications/:user_id', async (req, res) => {
 app.get('/api/notifications/:user_id/unread-count', async (req, res) => {
   try {
     const { user_id } = req.params;
+
+    // Handle temporary user IDs
+    if (user_id.startsWith('temp-')) {
+      res.json({ count: 0 });
+      return;
+    }
 
     const { count, error } = await supabase
       .from('notifications')
@@ -1847,6 +2358,30 @@ app.get('/api/users/:user_id/conversations', async (req, res) => {
     const transformedConversations = await Promise.all(conversations.map(async (conv) => {
       const otherUser = conv.user1_id === user_id ? conv.user2 : conv.user1;
       
+      // Get sport information for the other user
+      let sport = null;
+      if (otherUser.user_type === 'athlete') {
+        const { data: athleteData } = await supabase
+          .from('athletes')
+          .select('sport')
+          .eq('user_id', otherUser.id)
+          .single();
+        if (athleteData) sport = athleteData.sport;
+      } else if (otherUser.user_type === 'coach') {
+        const { data: coachData } = await supabase
+          .from('coaches')
+          .select('sport')
+          .eq('user_id', otherUser.id)
+          .single();
+        if (coachData) sport = coachData.sport;
+      }
+      
+      // Add sport to otherUser
+      const otherUserWithSport = {
+        ...otherUser,
+        sport: sport
+      };
+      
       // Get unread message count for this user
       const { count: unreadCount } = await supabase
         .from('messages')
@@ -1866,7 +2401,7 @@ app.get('/api/users/:user_id/conversations', async (req, res) => {
       
       return {
         id: conv.id,
-        other_user: otherUser,
+        other_user: otherUserWithSport,
         created_at: conv.created_at,
         updated_at: conv.updated_at,
         last_message_at: conv.last_message_at,
@@ -2077,6 +2612,12 @@ app.put('/api/conversations/:conversation_id/messages/read', async (req, res) =>
 app.get('/api/users/:user_id/unread-messages', async (req, res) => {
   try {
     const { user_id } = req.params;
+
+    // Handle temporary user IDs
+    if (user_id.startsWith('temp-')) {
+      res.json({ count: 0 });
+      return;
+    }
 
     // Count conversations that have unread messages for this user
     const { data, error } = await supabase
@@ -2337,6 +2878,134 @@ app.get('/api/supports/counts/:user_id', async (req, res) => {
   }
 });
 
+// Get list of users who support a specific user (supporters)
+app.get('/api/supports/supporters/:user_id', async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    const { limit = 50, offset = 0 } = req.query;
+
+    const { data: supports, error } = await supabase
+      .from('supports')
+      .select(`
+        supporter_id,
+        created_at,
+        supporter:users!supports_supporter_id_fkey(
+          id, display_name, email, avatar, user_type
+        )
+      `)
+      .eq('supported_id', user_id)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+    if (error) throw error;
+
+    // Enrich with sport information for athletes and coaches
+    const enrichedSupporters = await Promise.all(
+      supports.map(async (support) => {
+        const supporter = support.supporter;
+        if (!supporter) return null;
+
+        let sport = null;
+        if (supporter.user_type === 'athlete') {
+          const { data: athleteData } = await supabase
+            .from('athletes')
+            .select('sport')
+            .eq('user_id', supporter.id)
+            .single();
+          sport = athleteData?.sport;
+        } else if (supporter.user_type === 'coach') {
+          const { data: coachData } = await supabase
+            .from('coaches')
+            .select('sport')
+            .eq('user_id', supporter.id)
+            .single();
+          sport = coachData?.sport;
+        }
+
+        return {
+          id: supporter.id,
+          name: supporter.display_name || supporter.email,
+          username: supporter.email,
+          avatar: supporter.avatar || '/placeholder.svg',
+          sport: sport || supporter.user_type,
+          user_type: supporter.user_type,
+          supported_since: support.created_at,
+          isConnected: false // You can implement connection logic here
+        };
+      })
+    );
+
+    res.json(enrichedSupporters.filter(Boolean));
+  } catch (error) {
+    console.error('Error getting supporters:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get list of users that a specific user supports (supporting)
+app.get('/api/supports/supporting/:user_id', async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    const { limit = 50, offset = 0 } = req.query;
+
+    const { data: supports, error } = await supabase
+      .from('supports')
+      .select(`
+        supported_id,
+        created_at,
+        supported:users!supports_supported_id_fkey(
+          id, display_name, email, avatar, user_type
+        )
+      `)
+      .eq('supporter_id', user_id)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+    if (error) throw error;
+
+    // Enrich with sport information for athletes and coaches
+    const enrichedSupporting = await Promise.all(
+      supports.map(async (support) => {
+        const supported = support.supported;
+        if (!supported) return null;
+
+        let sport = null;
+        if (supported.user_type === 'athlete') {
+          const { data: athleteData } = await supabase
+            .from('athletes')
+            .select('sport')
+            .eq('user_id', supported.id)
+            .single();
+          sport = athleteData?.sport;
+        } else if (supported.user_type === 'coach') {
+          const { data: coachData } = await supabase
+            .from('coaches')
+            .select('sport')
+            .eq('user_id', supported.id)
+            .single();
+          sport = coachData?.sport;
+        }
+
+        return {
+          id: supported.id,
+          name: supported.display_name || supported.email,
+          username: supported.email,
+          avatar: supported.avatar || '/placeholder.svg',
+          sport: sport || supported.user_type,
+          user_type: supported.user_type,
+          supported_since: support.created_at,
+          isConnected: false // You can implement connection logic here
+        };
+      })
+    );
+
+    res.json(enrichedSupporting.filter(Boolean));
+  } catch (error) {
+    console.error('Error getting supporting:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Helper functions for support counts
 async function getSupporterCount(userId) {
   const { count, error } = await supabase
@@ -2358,7 +3027,523 @@ async function getSupportingCount(userId) {
   return count || 0;
 }
 
-const PORT = process.env.PORT || 3001;
+// ==================== REEL ENDPOINTS ====================
+
+// Upload a new reel
+app.post('/api/reels/upload', upload.single('video'), async (req, res) => {
+  try {
+    const { userId, caption, hashtags, audioAttribution, location } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({ error: 'No video file provided' });
+    }
+
+    // Validate video file
+    const allowedTypes = ['video/mp4', 'video/mov', 'video/avi', 'video/quicktime'];
+    if (!allowedTypes.includes(req.file.mimetype)) {
+      return res.status(400).json({ error: 'Invalid video format. Please upload MP4, MOV, AVI, or QuickTime files.' });
+    }
+
+    // Check file size (max 100MB)
+    const maxSize = 100 * 1024 * 1024; // 100MB
+    if (req.file.size > maxSize) {
+      return res.status(400).json({ error: 'Video file too large. Maximum size is 100MB.' });
+    }
+
+    // Generate unique filename
+    const fileExtension = req.file.originalname.split('.').pop();
+    const fileName = `reels/${userId}/${Date.now()}-${uuidv4()}.${fileExtension}`;
+
+    // Upload to Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('reels')
+      .upload(fileName, req.file.buffer, {
+        contentType: req.file.mimetype,
+        cacheControl: '3600'
+      });
+
+    if (uploadError) {
+      console.error('Upload error:', uploadError);
+      return res.status(500).json({ error: 'Failed to upload video' });
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('reels')
+      .getPublicUrl(fileName);
+
+    // Create thumbnail (you can implement thumbnail generation here)
+    const thumbnailUrl = publicUrl; // For now, use video URL as thumbnail
+
+    // Parse hashtags
+    const hashtagsArray = hashtags ? hashtags.split(',').map(tag => tag.trim().replace('#', '')) : [];
+
+    // Insert reel into database
+    const { data: reel, error: insertError } = await supabase
+      .from('reels')
+      .insert({
+        user_id: userId,
+        video_url: publicUrl,
+        thumbnail_url: thumbnailUrl,
+        caption: caption || null,
+        duration: 0, // You can extract duration using FFmpeg
+        audio_url: null,
+        audio_attribution: audioAttribution || null,
+        hashtags: hashtagsArray,
+        location: location || null,
+        is_public: true,
+        view_count: 0
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('Database insert error:', insertError);
+      return res.status(500).json({ error: 'Failed to save reel' });
+    }
+
+    // Get user info for response
+    const { data: user } = await supabase
+      .from('users')
+      .select('display_name, avatar, user_type')
+      .eq('id', userId)
+      .single();
+
+    const reelWithUser = {
+      ...reel,
+      user: {
+        id: userId,
+        name: user?.display_name || 'Unknown User',
+        avatar: user?.avatar || '/placeholder.svg',
+        user_type: user?.user_type || 'user'
+      }
+    };
+
+    res.json(reelWithUser);
+  } catch (error) {
+    console.error('Reel upload error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get reels feed
+app.get('/api/reels/feed', async (req, res) => {
+  try {
+    const { limit = 10, offset = 0, userId } = req.query;
+
+    let query = supabase
+      .from('reels')
+      .select(`
+        *,
+        user:users!reels_user_id_fkey(
+          id, display_name, avatar, user_type
+        )
+      `)
+      .eq('is_public', true)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+    const { data: reels, error } = await query;
+
+    if (error) throw error;
+
+    // Enrich reels with like/comment counts and user interaction status
+    const enrichedReels = await Promise.all(
+      reels.map(async (reel) => {
+        // Get like count
+        const { count: likeCount } = await supabase
+          .from('reel_likes')
+          .select('*', { count: 'exact', head: true })
+          .eq('reel_id', reel.id);
+
+        // Get comment count
+        const { count: commentCount } = await supabase
+          .from('reel_comments')
+          .select('*', { count: 'exact', head: true })
+          .eq('reel_id', reel.id);
+
+        // Check if current user has liked this reel
+        let isLiked = false;
+        if (userId) {
+          const { data: likeData } = await supabase
+            .from('reel_likes')
+            .select('id')
+            .eq('reel_id', reel.id)
+            .eq('user_id', userId)
+            .single();
+          isLiked = !!likeData;
+        }
+
+        // Check if current user has saved this reel
+        let isSaved = false;
+        if (userId) {
+          const { data: saveData } = await supabase
+            .from('reel_saves')
+            .select('id')
+            .eq('reel_id', reel.id)
+            .eq('user_id', userId)
+            .single();
+          isSaved = !!saveData;
+        }
+
+        return {
+          ...reel,
+          like_count: likeCount || 0,
+          comment_count: commentCount || 0,
+          is_liked: isLiked,
+          is_saved: isSaved
+        };
+      })
+    );
+
+    res.json(enrichedReels);
+  } catch (error) {
+    console.error('Error fetching reels:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Like/unlike a reel
+app.post('/api/reels/:reelId/like', async (req, res) => {
+  try {
+    const { reelId } = req.params;
+    const { userId } = req.body;
+
+    // Check if user already liked the reel
+    const { data: existingLike } = await supabase
+      .from('reel_likes')
+      .select('id')
+      .eq('reel_id', reelId)
+      .eq('user_id', userId)
+      .single();
+
+    if (existingLike) {
+      // Unlike
+      await supabase
+        .from('reel_likes')
+        .delete()
+        .eq('reel_id', reelId)
+        .eq('user_id', userId);
+
+      res.json({ liked: false });
+    } else {
+      // Like
+      await supabase
+        .from('reel_likes')
+        .insert({
+          reel_id: reelId,
+          user_id: userId
+        });
+
+      // Create notification for reel owner
+      const { data: reel } = await supabase
+        .from('reels')
+        .select('user_id')
+        .eq('id', reelId)
+        .single();
+
+      if (reel && reel.user_id !== userId) {
+        await supabase
+          .from('notifications')
+          .insert({
+            user_id: reel.user_id,
+            actor_id: userId,
+            type: 'like',
+            message: 'liked your reel'
+          });
+      }
+
+      res.json({ liked: true });
+    }
+  } catch (error) {
+    console.error('Error toggling reel like:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Save/unsave a reel
+app.post('/api/reels/:reelId/save', async (req, res) => {
+  try {
+    const { reelId } = req.params;
+    const { userId } = req.body;
+
+    // Check if user already saved the reel
+    const { data: existingSave } = await supabase
+      .from('reel_saves')
+      .select('id')
+      .eq('reel_id', reelId)
+      .eq('user_id', userId)
+      .single();
+
+    if (existingSave) {
+      // Unsave
+      await supabase
+        .from('reel_saves')
+        .delete()
+        .eq('reel_id', reelId)
+        .eq('user_id', userId);
+
+      res.json({ saved: false });
+    } else {
+      // Save
+      await supabase
+        .from('reel_saves')
+        .insert({
+          reel_id: reelId,
+          user_id: userId
+        });
+
+      res.json({ saved: true });
+    }
+  } catch (error) {
+    console.error('Error toggling reel save:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Share a reel
+app.post('/api/reels/:reelId/share', async (req, res) => {
+  try {
+    const { reelId } = req.params;
+    const { userId, sharedTo } = req.body;
+
+    await supabase
+      .from('reel_shares')
+      .insert({
+        reel_id: reelId,
+        user_id: userId,
+        shared_to: sharedTo || 'general'
+      });
+
+    res.json({ shared: true });
+  } catch (error) {
+    console.error('Error sharing reel:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get reel comments
+app.get('/api/reels/:reelId/comments', async (req, res) => {
+  try {
+    const { reelId } = req.params;
+    const { limit = 20, offset = 0 } = req.query;
+
+    const { data: comments, error } = await supabase
+      .from('reel_comments')
+      .select(`
+        *,
+        user:users!reel_comments_user_id_fkey(
+          id, display_name, avatar, user_type
+        )
+      `)
+      .eq('reel_id', reelId)
+      .is('parent_comment_id', null) // Only top-level comments
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+    if (error) throw error;
+
+    // Enrich comments with like counts and replies
+    const enrichedComments = await Promise.all(
+      comments.map(async (comment) => {
+        // Get like count
+        const { count: likeCount } = await supabase
+          .from('reel_comment_likes')
+          .select('*', { count: 'exact', head: true })
+          .eq('comment_id', comment.id);
+
+        // Get reply count
+        const { count: replyCount } = await supabase
+          .from('reel_comments')
+          .select('*', { count: 'exact', head: true })
+          .eq('parent_comment_id', comment.id);
+
+        return {
+          ...comment,
+          like_count: likeCount || 0,
+          reply_count: replyCount || 0
+        };
+      })
+    );
+
+    res.json(enrichedComments);
+  } catch (error) {
+    console.error('Error fetching reel comments:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add comment to reel
+app.post('/api/reels/:reelId/comments', async (req, res) => {
+  try {
+    const { reelId } = req.params;
+    const { userId, comment, parentCommentId } = req.body;
+
+    const { data: newComment, error } = await supabase
+      .from('reel_comments')
+      .insert({
+        reel_id: reelId,
+        user_id: userId,
+        comment: comment,
+        parent_comment_id: parentCommentId || null
+      })
+      .select(`
+        *,
+        user:users!reel_comments_user_id_fkey(
+          id, display_name, avatar, user_type
+        )
+      `)
+      .single();
+
+    if (error) throw error;
+
+    // Create notification for reel owner
+    const { data: reel } = await supabase
+      .from('reels')
+      .select('user_id')
+      .eq('id', reelId)
+      .single();
+
+    if (reel && reel.user_id !== userId) {
+      await supabase
+        .from('notifications')
+        .insert({
+          user_id: reel.user_id,
+          actor_id: userId,
+          type: 'comment',
+          message: 'commented on your reel'
+        });
+    }
+
+    res.json(newComment);
+  } catch (error) {
+    console.error('Error adding reel comment:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Like/unlike a reel comment
+app.post('/api/reels/comments/:commentId/like', async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const { userId } = req.body;
+
+    // Check if user already liked the comment
+    const { data: existingLike } = await supabase
+      .from('reel_comment_likes')
+      .select('id')
+      .eq('comment_id', commentId)
+      .eq('user_id', userId)
+      .single();
+
+    if (existingLike) {
+      // Unlike
+      await supabase
+        .from('reel_comment_likes')
+        .delete()
+        .eq('comment_id', commentId)
+        .eq('user_id', userId);
+
+      res.json({ liked: false });
+    } else {
+      // Like
+      await supabase
+        .from('reel_comment_likes')
+        .insert({
+          comment_id: commentId,
+          user_id: userId
+        });
+
+      res.json({ liked: true });
+    }
+  } catch (error) {
+    console.error('Error toggling comment like:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Record reel view
+app.post('/api/reels/:reelId/view', async (req, res) => {
+  try {
+    const { reelId } = req.params;
+    const { userId, viewDuration } = req.body;
+
+    // Record the view
+    await supabase
+      .from('reel_views')
+      .insert({
+        reel_id: reelId,
+        viewer_id: userId,
+        view_duration: viewDuration || 0
+      });
+
+    // Update reel view count
+    await supabase
+      .from('reels')
+      .update({ view_count: supabase.rpc('increment') })
+      .eq('id', reelId);
+
+    res.json({ viewed: true });
+  } catch (error) {
+    console.error('Error recording reel view:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get user's reels
+app.get('/api/users/:userId/reels', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { limit = 20, offset = 0 } = req.query;
+
+    const { data: reels, error } = await supabase
+      .from('reels')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_public', true)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+    if (error) throw error;
+
+    res.json(reels);
+  } catch (error) {
+    console.error('Error fetching user reels:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get saved reels for a user
+app.get('/api/users/:userId/saved-reels', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { limit = 20, offset = 0 } = req.query;
+
+    const { data: savedReels, error } = await supabase
+      .from('reel_saves')
+      .select(`
+        *,
+        reel:reels!reel_saves_reel_id_fkey(
+          *,
+          user:users!reels_user_id_fkey(
+            id, display_name, avatar, user_type
+          )
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+    if (error) throw error;
+
+    res.json(savedReels.map(item => item.reel));
+  } catch (error) {
+    console.error('Error fetching saved reels:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Socket.IO server ready for real-time notifications`);

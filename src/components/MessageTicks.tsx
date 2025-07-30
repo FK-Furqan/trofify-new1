@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, CheckCheck } from 'lucide-react';
+import { Check } from 'lucide-react';
 
 interface MessageTicksProps {
   deliveryStatus: 'sent' | 'delivered' | 'read';
@@ -14,7 +14,7 @@ export const MessageTicks: React.FC<MessageTicksProps> = ({ deliveryStatus, isOw
   const getTicksColor = () => {
     switch (deliveryStatus) {
       case 'read':
-        return 'text-[#2e3a3f] font-semibold'; // Dark color for read messages
+        return 'text-[#45bfbb] font-semibold'; // Teal color for read messages
       case 'delivered':
         return 'text-gray-200'; // Light gray for delivered (more visible than gray-300)
       case 'sent':
@@ -28,7 +28,12 @@ export const MessageTicks: React.FC<MessageTicksProps> = ({ deliveryStatus, isOw
     switch (deliveryStatus) {
       case 'read':
       case 'delivered':
-        return <CheckCheck className="h-3 w-3" />; // Double tick
+        return (
+          <div className="relative">
+            <Check className="h-3 w-3" />
+            <Check className="h-3 w-3 absolute -bottom-0.5 -right-0.5" />
+          </div>
+        ); // Custom double tick positioned like WhatsApp
       case 'sent':
         return <Check className="h-3 w-3" />; // Single tick
       default:

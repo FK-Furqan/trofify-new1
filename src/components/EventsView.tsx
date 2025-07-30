@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Calendar, MapPin, Users, Clock, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { toProperCase } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 export const EventsView = () => {
@@ -92,7 +93,7 @@ export const EventsView = () => {
           <div className="flex space-x-4 sm:space-x-6 overflow-x-auto">
             <button
               onClick={() => setActiveTab("upcoming")}
-              className={`pb-2 border-b-2 font-medium whitespace-nowrap text-sm sm:text-base ${
+              className={`pb-2 border-b-4 font-medium whitespace-nowrap text-sm sm:text-base ${
                 activeTab === "upcoming"
                   ? "border-[#0e9591] text-[#0e9591]"
                   : "border-transparent text-muted-foreground"
@@ -102,7 +103,7 @@ export const EventsView = () => {
             </button>
             <button
               onClick={() => setActiveTab("my-events")}
-              className={`pb-2 border-b-2 font-medium whitespace-nowrap text-sm sm:text-base ${
+              className={`pb-2 border-b-4 font-medium whitespace-nowrap text-sm sm:text-base ${
                 activeTab === "my-events"
                   ? "border-[#0e9591] text-[#0e9591]"
                   : "border-transparent text-muted-foreground"
@@ -112,7 +113,7 @@ export const EventsView = () => {
             </button>
             <button
               onClick={() => setActiveTab("hosting")}
-              className={`pb-2 border-b-2 font-medium whitespace-nowrap text-sm sm:text-base ${
+              className={`pb-2 border-b-4 font-medium whitespace-nowrap text-sm sm:text-base ${
                 activeTab === "hosting"
                   ? "border-[#0e9591] text-[#0e9591]"
                   : "border-transparent text-muted-foreground"
@@ -149,7 +150,7 @@ export const EventsView = () => {
                               <span className="text-white text-xs">✓</span>
                             </div>
                           )}
-                          <Badge variant="secondary">{event.category}</Badge>
+                          <Badge variant="secondary">{toProperCase(event.category)}</Badge>
                         </div>
 
                         <div className="space-y-2 text-sm text-gray-600">
@@ -235,7 +236,7 @@ export const EventsView = () => {
                       </span>
                     </div>
                     <Badge variant="outline" className="mt-2">
-                      {event.role}
+                      {toProperCase(event.role)}
                     </Badge>
                   </div>
                   <div className="flex space-x-2 self-start sm:self-auto">

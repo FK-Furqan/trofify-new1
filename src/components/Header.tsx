@@ -91,8 +91,8 @@ export const Header = ({ activeTab, setActiveTab, setIsAuthenticated, userProfil
               onClick={() => setActiveTab("home")}
             >
               <img
-                src="/Trofify Logo.png?v=2"
-                alt="TrofiFy Logo"
+                              src="/Trofify Logo.png?v=2"
+              alt="Trofify Logo"
                 className="w-24 h-16 sm:w-40 sm:h-24 object-contain"
               />
             </div>
@@ -136,31 +136,18 @@ export const Header = ({ activeTab, setActiveTab, setIsAuthenticated, userProfil
                 size="sm" 
                 className="p-2"
                 onClick={() => {
-                  console.log('Desktop Create Post button clicked');
                   setActiveTab("create-post");
                 }}
               >
                 <Plus className="h-5 w-5" />
               </Button>
-              {/* Create Story Button */}
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="p-2 text-orange-500"
-                onClick={() => {
-                  console.log('Desktop Create Story button clicked');
-                  setActiveTab("create-story");
-                }}
-              >
-                <Calendar className="h-5 w-5" />
-              </Button>
+
               {/* Desktop Create Post Button */}
               <Button
                 variant="outline"
                 size="sm"
                 className="hidden lg:inline-flex ml-2"
                 onClick={() => {
-                  console.log('Desktop Create Post text button clicked');
                   setActiveTab("create-post");
                 }}
               >
@@ -174,14 +161,14 @@ export const Header = ({ activeTab, setActiveTab, setIsAuthenticated, userProfil
                   onClick={() => setActiveTab("profile")}
                   className="hidden sm:flex p-2"
                 >
-                  <span className="inline-block w-8 h-8 rounded-full overflow-hidden bg-gray-200">
-                                          <img
-                        key={`header-avatar-${profileImageKey}`}
-                        src={getAvatarUrlWithCacheBust(profile.avatar)}
-                        alt="Profile"
-                        className="w-full h-full object-cover"
-                        onError={e => { e.currentTarget.src = "/placeholder.svg"; }}
-                      />
+                                    <span className="inline-block w-8 h-8 rounded-full overflow-hidden bg-gray-200">
+                    <img
+                      key={`header-avatar-${profileImageKey}`}
+                      src={getAvatarUrlWithCacheBust(profile.avatar)}
+                      alt="Profile"
+                      className="w-full h-full object-cover"
+                      onError={e => { e.currentTarget.src = "/placeholder.svg"; }}
+                    />
                   </span>
                 </Button>
               ) : null}

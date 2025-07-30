@@ -15,6 +15,7 @@ export interface Notification {
     email: string;
     avatar: string;
     user_type: string;
+    sport?: string;
   };
   post?: {
     id: number;

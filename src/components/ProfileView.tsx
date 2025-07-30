@@ -36,7 +36,10 @@ import { useNavigate } from "react-router-dom";
 import { PostActions } from "./PostActions";
 import { PostCard } from "./PostCard";
 import { PostModal } from "./PostModal";
-import { getBackendUrl, handleProfileImageUpdate } from "@/lib/utils";
+import { ProfileCompletionIndicator, useProfileCompletion } from "./ProfileCompletionIndicator";
+import { EditProfileForm } from "./EditProfileForm";
+import { ProfilePhotoUpload } from "./ProfilePhotoUpload";
+import { getBackendUrl, handleProfileImageUpdate, formatTimestamp } from "@/lib/utils";
 const defaultAvatar = "/placeholder.svg"; // Use direct public path
 
 interface ProfileViewProps {
@@ -47,17 +50,11 @@ interface ProfileViewProps {
   onProfileClick?: (profile: any) => void;
   onSaveChange?: () => void; // Add callback for save changes
   onNavigateToMessages?: () => void; // Add callback for messages navigation
+  onMessageUser?: (userId: string) => void; // Add callback for messaging specific user
+  onAddStoryClick?: () => void; // Add callback for story creation
 }
 
-export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfile, onProfileClick, onSaveChange, onNavigateToMessages }: ProfileViewProps) => {
-  // Debug log for troubleshooting profile ownership
-  console.log("ProfileView props:", { 
-    profile, 
-    loggedInUserId, 
-    profileId: profile?.id,
-    profileEmail: profile?.email,
-    isOwnProfile: profile && loggedInUserId && (profile.id === loggedInUserId || profile.email === loggedInUserId) 
-  });
+export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfile, onProfileClick, onSaveChange, onNavigateToMessages, onMessageUser, onAddStoryClick }: ProfileViewProps) => {
   
   const [activeTab, setActiveTab] = useState("posts");
   const [editOpen, setEditOpen] = useState(false);
@@ -66,13 +63,10 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
   const [retryCount, setRetryCount] = useState(0);
   const [imageLoading, setImageLoading] = useState(true);
   const [profileImageKey, setProfileImageKey] = useState(0);
-  const fileInputRef = useRef(null);
   const [isMobile, setIsMobile] = useState(false);
   const navigate = useNavigate();
-  const [showImageDialog, setShowImageDialog] = useState(false);
+  const [showPhotoUpload, setShowPhotoUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const cameraInputRef = useRef(null);
-  const galleryInputRef = useRef(null);
   const [posts, setPosts] = useState([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [postsError, setPostsError] = useState("");
@@ -90,38 +84,18 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
   const [supportingCount, setSupportingCount] = useState<number>(0);
   const [supportLoading, setSupportLoading] = useState(false);
 
-  // Format time ago helper function
-  const formatTimeAgo = (dateString: string) => {
-    if (!dateString) return "";
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    if (diffHours < 1) {
-      return diffMins <= 1 ? "Just now" : `${diffMins} minutes ago`;
-    } else if (diffHours < 24) {
-      return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    } else {
-      // Show date in format: May 20, 2024
-      return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-    }
-  };
+
 
   // Helper to get the correct avatar URL
   const getAvatarUrl = (avatar?: string) => {
-    console.log("getAvatarUrl called with:", avatar);
     if (!avatar) {
-      console.log("No avatar, returning placeholder");
       return "/placeholder.svg";
     }
+    
     if (avatar.startsWith("http")) {
-      console.log("Avatar is already a full URL:", avatar);
       return avatar;
     }
     if (avatar.startsWith("/")) {
-      console.log("Avatar is a relative path:", avatar);
       return avatar;
     }
     return "/placeholder.svg";
@@ -145,26 +119,88 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
     return `${baseUrl}${separator}t=${Date.now()}`;
   };
 
-  // Guard: If profile is not loaded, show loading spinner
-  if (!profile) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-4 border-muted border-t-[#0e9591]" />
-          <p className="text-muted-foreground font-medium">Loading profile...</p>
-        </div>
-      </div>
-    );
-  }
+  // Move all hooks to the top before any early returns
+  // State to store complete profile data
+  const [completeProfileData, setCompleteProfileData] = useState<any>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // Fetch complete profile data including sport information
+  useEffect(() => {
+    const fetchCompleteProfile = async () => {
+      if (!profile?.id) return;
+      
+      setProfileLoading(true);
+      try {
+        console.log('Fetching complete profile for user ID:', profile.id);
+        const response = await fetch(`${getBackendUrl()}/api/users/${profile.id}`);
+        if (response.ok) {
+          const completeProfile = await response.json();
+          console.log('Complete profile data:', completeProfile);
+          setCompleteProfileData(completeProfile);
+        } else {
+          console.error('Failed to fetch complete profile data');
+        }
+      } catch (error) {
+        console.error('Error fetching complete profile:', error);
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+
+    fetchCompleteProfile();
+  }, [profile?.id]);
+
+  // Define helper functions first
+  const getDisplayName = (profile: any) => {
+    return profile?.display_name || 
+           profile?.full_name || 
+           profile?.name || 
+           profile?.email?.split('@')[0] || 
+           "Unknown";
+  };
+
+  // Normalize profile data to ensure consistent structure
+  const normalizeProfile = (profile: any) => {
+    if (!profile) return null;
+    
+    // Ensure we have at least a basic profile structure
+    const normalized = {
+      id: profile.id || profile.user_id || null,
+      email: profile.email || "",
+      display_name: profile.display_name || profile.name || profile.email?.split('@')[0] || "Unknown",
+      full_name: profile.full_name || profile.name || profile.display_name,
+      name: profile.name || profile.display_name || profile.full_name,
+      avatar: profile.avatar || null,
+      user_type: profile.user_type || profile.sport || "athlete",
+      sport: profile.sport || null,
+      // Add any other fields that might be needed
+      ...profile
+    };
+    
+    // Validate that we have at least an ID or email
+    if (!normalized.id && !normalized.email) {
+      console.error("Profile normalization failed: no ID or email found", profile);
+      return null;
+    }
+    
+    return normalized;
+  };
+
+  // Process profile data early to avoid undefined issues
+  const currentProfile = profile;
+  const normalizedProfile = normalizeProfile(currentProfile);
+  const finalProfile = completeProfileData || normalizedProfile;
+  
+
+
+
 
 
 
   // Fetch posts for this profile
   useEffect(() => {
     const fetchPosts = async () => {
-      console.log("Fetching posts for profile:", profile);
       if (!profile?.id) {
-        console.log("No profile ID found, cannot fetch posts");
         setPostsLoading(false);
         setPostsError("Profile not found");
         return;
@@ -174,16 +210,13 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
       try {
         // Convert ID to string to ensure consistency
         const profileId = profile.id.toString();
-        console.log("Making request to:", `${getBackendUrl()}/api/posts/user/${profileId}`);
         const res = await fetch(`${getBackendUrl()}/api/posts/user/${profileId}?current_user_id=${loggedInUserId || ''}`);
-        console.log("Response status:", res.status);
         if (!res.ok) {
           const errorText = await res.text();
           console.error("Response error:", errorText);
           throw new Error(`Failed to fetch posts: ${res.status} ${errorText}`);
         }
         const data = await res.json();
-        console.log("Posts data:", data);
         setPosts(Array.isArray(data) ? data : []);
         setPostsRetryCount(0); // Reset retry count on success
       } catch (err) {
@@ -254,16 +287,16 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
     setImageLoadError(false);
     setRetryCount(0);
     setImageLoading(true);
-    console.log("Profile avatar updated:", profile?.avatar);
+
   }, [profile?.avatar]); // Watch for changes in avatar specifically
+
+
 
   // Helper to re-fetch profile if image fails to load
   const refetchProfile = async () => {
     if (!profile?.email) {
-      console.log("No email available for profile refetch");
       return;
     }
-    console.log("Refetching profile for email:", profile.email);
     try {
       const res = await fetch(`${getBackendUrl()}/signup/profile`, {
         method: "POST",
@@ -272,16 +305,16 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
       });
       if (res.ok) {
         const data = await res.json();
-        console.log("Profile refetch successful:", data);
+
         setProfileImage(data.avatar || "");
         setImageLoadError(false);
         setRetryCount((c) => c + 1);
       } else {
-        console.log("Profile refetch failed with status:", res.status);
+
         setImageLoadError(true);
       }
     } catch (error) {
-      console.log("Profile refetch error:", error);
+
       setImageLoadError(true);
     }
   };
@@ -297,83 +330,45 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
   };
 
   const handleCameraClick = () => {
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
+    setShowPhotoUpload(true);
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !profile?.id) return;
+  const handlePhotoUploadClick = () => {
+    setShowPhotoUpload(true);
+  };
+
+  const handlePhotoUploaded = (imageUrl: string) => {
+    // Update local state immediately
+    setProfileImage(imageUrl);
+    setImageLoadError(false);
+    setImageLoading(false);
     
-    setUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("userId", profile.id);
-    
-    try {
-      const res = await axios.post(`${getBackendUrl()}/api/upload-profile-image`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      
-      const newImageUrl = res.data.imageUrl;
-      console.log("Profile image uploaded successfully:", newImageUrl);
-      
-      // Update local state immediately
-      setProfileImage(newImageUrl);
-      setImageLoadError(false);
-      setImageLoading(false);
-      
-      // Update the profile object with new avatar
-      if (profile) {
-        const updatedProfile = { ...profile, avatar: newImageUrl };
-        // Force re-render by updating the profile reference
-        if (refreshUserProfile) {
-          // Add a small delay to ensure the backend has processed the update
-          setTimeout(() => {
-            refreshUserProfile(); // Refresh global profile after upload
-          }, 1000);
-        }
+    // Update the profile object with new avatar
+    if (profile) {
+      const updatedProfile = { ...profile, avatar: imageUrl };
+      // Force re-render by updating the profile reference
+      if (refreshUserProfile) {
+        // Add a small delay to ensure the backend has processed the update
+        setTimeout(() => {
+          refreshUserProfile(); // Refresh global profile after upload
+        }, 1000);
       }
-      
-      // Close the image dialog
-      setShowImageDialog(false);
-      
-      // Clear the file inputs to allow re-uploading the same file
-      if (cameraInputRef.current) {
-        (cameraInputRef.current as HTMLInputElement).value = '';
-      }
-      if (galleryInputRef.current) {
-        (galleryInputRef.current as HTMLInputElement).value = '';
-      }
-      
-      // Show success feedback
-      console.log("Profile image updated successfully!");
-      
-      // Use utility function to handle profile image update
-      handleProfileImageUpdate(profile.id, newImageUrl, refreshUserProfile);
-      
-    } catch (err) {
-      console.error("Failed to upload image:", err);
-      alert("Failed to upload image. Please try again.");
-    } finally {
-      setUploading(false);
     }
+    
+    // Use utility function to handle profile image update
+    handleProfileImageUpdate(profile?.id || '', imageUrl, refreshUserProfile);
   };
 
   // Add navigation handler with loading state
   const handleBackNavigation = async () => {
-    console.log('ProfileView: handleBackNavigation called');
     setNavigatingBack(true);
     try {
       // Small delay to show spinner
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      console.log('ProfileView: Calling onBack function');
       if (onBack) {
         onBack();
       } else {
-        console.log('ProfileView: No onBack function, navigating to home');
         navigate('/');
       }
     } catch (error) {
@@ -391,7 +386,11 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
 
   // Add message navigation handler
   const handleMessageClick = () => {
-    if (onNavigateToMessages) {
+    if (onMessageUser && finalProfile?.id) {
+      // Navigate to messages with specific user
+      onMessageUser(finalProfile.id);
+    } else if (onNavigateToMessages) {
+      // Fallback to general messages navigation
       onNavigateToMessages();
     }
   };
@@ -428,7 +427,7 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
         });
       }
       
-      console.log('Support action completed:', result);
+
     } catch (error) {
       console.error('Error toggling support:', error);
       // Reset state on error to prevent UI issues
@@ -466,9 +465,6 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
   };
 
   const handlePostClick = (post: any) => {
-    console.log('ProfileView: handlePostClick called with post:', post);
-    console.log('ProfileView: post.images:', post.images);
-    console.log('ProfileView: post.image:', post.image);
     setSelectedPost(post);
     setIsModalOpen(true);
   };
@@ -477,98 +473,20 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
     setIsModalOpen(false);
     setSelectedPost(null);
   };
+  
 
-  // Remove defaultProfile and any fallback to it
-  // Replace: const currentProfile = profile || defaultProfile;
-  const currentProfile = profile;
   
-  // Debug logging for profile data
-  console.log("ProfileView - Current Profile:", currentProfile);
-  
-  // Get the best available name for display
-  const getDisplayName = (profile: any) => {
-    return profile?.display_name || 
-           profile?.full_name || 
-           profile?.name || 
-           profile?.email?.split('@')[0] || 
-           "Unknown";
-  };
-
-  // Normalize profile data to ensure consistent structure
-  const normalizeProfile = (profile: any) => {
-    if (!profile) return null;
-    
-    console.log("Normalizing profile data:", profile);
-    
-    // Ensure we have at least a basic profile structure
-    const normalized = {
-      id: profile.id || profile.user_id || null,
-      email: profile.email || "",
-      display_name: profile.display_name || profile.name || profile.email?.split('@')[0] || "Unknown",
-      full_name: profile.full_name || profile.name || profile.display_name,
-      name: profile.name || profile.display_name || profile.full_name,
-      avatar: profile.avatar || null,
-      user_type: profile.user_type || profile.sport || "athlete",
-      sport: profile.sport || profile.user_type || "athlete",
-      // Add any other fields that might be needed
-      ...profile
-    };
-    
-    // Validate that we have at least an ID or email
-    if (!normalized.id && !normalized.email) {
-      console.error("Profile normalization failed: no ID or email found", profile);
-      return null;
-    }
-    
-    return normalized;
-  };
-
-  // Use normalized profile data
-  const normalizedProfile = normalizeProfile(currentProfile);
-  
-  // Debug logging for normalized profile data
-  console.log("ProfileView - Normalized Profile:", normalizedProfile);
-  console.log("ProfileView - Profile Avatar:", normalizedProfile?.avatar);
-  console.log("ProfileView - Profile Name:", normalizedProfile?.name);
-  console.log("ProfileView - Profile Display Name:", normalizedProfile?.display_name);
-  console.log("ProfileView - Profile Full Name:", normalizedProfile?.full_name);
-  console.log("ProfileView - Profile Email:", normalizedProfile?.email);
-  console.log("ProfileView - Profile ID:", normalizedProfile?.id);
-  console.log("ProfileView - Profile User Type:", normalizedProfile?.user_type);
-  console.log("ProfileView - Profile Sport:", normalizedProfile?.sport);
-  
-  // State to store complete profile data
-  const [completeProfileData, setCompleteProfileData] = useState<any>(null);
-  const [profileLoading, setProfileLoading] = useState(false);
-  
-  // If profile doesn't have avatar, fetch complete profile data from backend
-  useEffect(() => {
-    const fetchCompleteProfile = async () => {
-      if (normalizedProfile?.id && !normalizedProfile?.avatar && !completeProfileData && !profileLoading) {
-        console.log("ProfileView: Fetching complete profile data for ID:", normalizedProfile.id);
-        setProfileLoading(true);
-        try {
-          const response = await fetch(`${getBackendUrl()}/api/users/${normalizedProfile.id}`);
-          if (response.ok) {
-            const completeProfile = await response.json();
-            console.log("ProfileView: Complete profile data fetched:", completeProfile);
-            setCompleteProfileData(completeProfile);
-          } else {
-            console.error("ProfileView: Failed to fetch profile, status:", response.status);
-          }
-        } catch (error) {
-          console.error("ProfileView: Error fetching complete profile:", error);
-        } finally {
-          setProfileLoading(false);
-        }
-      }
-    };
-    
-    fetchCompleteProfile();
-  }, [normalizedProfile?.id, normalizedProfile?.avatar, completeProfileData, profileLoading]);
-  
-  // Use complete profile data if available, otherwise use normalized profile
-  const finalProfile = completeProfileData || normalizedProfile;
+  // Guard: If profile is not loaded, show loading spinner
+  if (!profile) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-muted border-t-[#0e9591]" />
+          <p className="text-muted-foreground font-medium">Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
   
   // Show loading state if we're fetching complete profile data
   if (profileLoading && !finalProfile?.avatar) {
@@ -594,21 +512,15 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
   useEffect(() => {
     const fetchSupportData = async () => {
       if (!finalProfile?.id) {
-        console.log('No finalProfile.id available for support data fetching');
         return;
       }
-      
-      console.log('Fetching support data for profile:', finalProfile.id);
       
       try {
         // Get support counts for the viewed profile
         const counts = await SupportService.getSupportCounts(finalProfile.id);
-        console.log('Support counts received:', counts);
         
         const supporterCount = counts.supporter_count || 0;
         const supportingCount = counts.supporting_count || 0;
-        
-        console.log('Setting counts - supporterCount:', supporterCount, 'supportingCount:', supportingCount);
         
         setSupporterCount(supporterCount);
         setSupportingCount(supportingCount);
@@ -636,8 +548,6 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
     }
     
     const subscription = SupportService.subscribeToSupportChanges(finalProfile.id, async (payload) => {
-      console.log('Support change detected:', payload);
-      
       // Refresh support data when changes occur
       try {
         const counts = await SupportService.getSupportCounts(finalProfile.id);
@@ -656,14 +566,7 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
     };
   }, [finalProfile?.id, loggedInUserId, isOwnProfile]);
   
-  // Additional debug logging for mobile view
-  console.log("Mobile view debug:", { 
-    isMobile, 
-    isOwnProfile, 
-    windowWidth: window.innerWidth,
-    hasProfile: !!profile,
-    hasLoggedInUserId: !!loggedInUserId
-  });
+
 
   // Add spinner CSS in a <style> tag at the top of the file (or move to App.css if preferred)
   const Spinner = () => (
@@ -696,8 +599,7 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
     );
   }
 
-  // Debug logging for support counts
-  console.log('Rendering ProfileView with counts:', { supporterCount, supportingCount, finalProfile: finalProfile?.id });
+
 
   if (isMobile) {
     // MOBILE LAYOUT
@@ -716,18 +618,14 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
             alt="Profile"
             className="object-cover w-full h-full"
             onError={() => {
-              console.log("Profile image failed to load:", profileImage || normalizedProfile?.avatar);
               setImageLoading(false);
               if (!imageLoadError && retryCount < 1) {
-                console.log("Retrying profile fetch...");
                 refetchProfile();
               } else {
-                console.log("Setting image load error to true");
                 setImageLoadError(true);
               }
             }}
             onLoad={() => {
-              console.log("Profile image loaded successfully:", profileImage || normalizedProfile?.avatar);
               setImageLoadError(false);
               setImageLoading(false);
             }}
@@ -750,85 +648,87 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
           {isOwnProfile && (
             <button
               className="absolute top-1 right-4 bg-white dark:bg-gray-800 rounded-full p-2 shadow-lg z-30 border-2 border-[#0e9591] hover:bg-[#0e9591] transition-all duration-200 group"
-              onClick={() => setShowImageDialog(true)}
+              onClick={handlePhotoUploadClick}
               aria-label="Change profile image"
             >
               <Camera className="h-4 w-4 text-[#0e9591] group-hover:text-white transition-colors duration-200" />
             </button>
           )}
-          {/* Camera/Gallery Dialog */}
-          <Dialog open={showImageDialog} onOpenChange={setShowImageDialog}>
-            <DialogContent className="max-w-xs w-full p-4 text-center">
-              <DialogHeader>
-                <DialogTitle>Change Profile Image</DialogTitle>
-              </DialogHeader>
-              <div className="flex flex-col gap-3 mt-2">
-                <button
-                  className="bg-[#0e9591] text-white py-2 rounded-lg font-semibold"
-                  onClick={() => {
-                    setShowImageDialog(false);
-                    setTimeout(() => cameraInputRef.current?.click(), 200);
-                  }}
-                  disabled={uploading}
-                >
-                  Open Camera
-                </button>
-                <button
-                  className="bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold"
-                  onClick={() => {
-                    setShowImageDialog(false);
-                    setTimeout(() => galleryInputRef.current?.click(), 200);
-                  }}
-                  disabled={uploading}
-                >
-                  Open Gallery
-                </button>
-                {uploading && <Spinner />}
-              </div>
-            </DialogContent>
-          </Dialog>
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            ref={cameraInputRef}
-            style={{ display: 'none' }}
-            onChange={handleFileChange}
-          />
-          <input
-            type="file"
-            accept="image/*"
-            ref={galleryInputRef}
-            style={{ display: 'none' }}
-            onChange={handleFileChange}
-          />
         </div>
         {/* Scrollable Content */}
         <div
-          className="relative z-20"
-          style={{ marginTop: 'calc(52vh - 28px)' }}
+          className="relative z-20 bg-background rounded-t-3xl"
+          style={{ marginTop: 'calc(52vh - 28px)', paddingBottom: '1px' }}
         >
           {/* Overlapping White Info Card */}
           <div className="bg-card rounded-t-3xl shadow-lg p-4 -mt-12">
             <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-2xl font-bold flex items-center text-foreground">
+              <h1 className="trofify-title flex items-center text-foreground">
                 {getDisplayName(finalProfile)}
               </h1>
-              <span className="bg-[#0e9591] text-white px-3 py-1 rounded-full text-xs font-semibold">
-                {(finalProfile?.sport || finalProfile?.user_type || "User").toUpperCase()}
-              </span>
+              <div className="flex items-center space-x-1">
+                {finalProfile?.sport && (
+                  <span className="bg-gray-600 text-white px-3 py-1 rounded-full text-xs font-semibold flex items-center justify-center">
+                    {finalProfile.sport.toUpperCase()}
+                  </span>
+                )}
+                <span className="bg-[#0e9591] text-white px-3 py-1 rounded-full text-xs font-semibold flex items-center justify-center">
+                  {(finalProfile?.user_type || "User").toUpperCase()}
+                </span>
+              </div>
+
             </div>
             <div className="mb-2 text-muted-foreground text-sm">
               {currentProfile.bio || currentProfile.description || "No bio available."}
             </div>
-            <div className="flex gap-4 text-sm text-muted-foreground mb-2">
-              <span><span className="font-semibold">{(supporterCount || 0).toLocaleString()}</span> Supporters</span>
-              <span>•</span>
-              <span><span className="font-semibold">{(supportingCount || 0).toLocaleString()}</span> Supporting</span>
+            <div className="flex gap-6 text-sm text-muted-foreground mb-2">
+              <div className="flex flex-col items-center">
+                <span className="font-semibold text-lg">{(supporterCount || 0).toLocaleString()}</span>
+                <span className="text-xs">Supporters</span>
+              </div>
+              <div className="flex flex-col items-center">
+                <span className="font-semibold text-lg">{(supportingCount || 0).toLocaleString()}</span>
+                <span className="text-xs">Supporting</span>
+              </div>
+              <div className="flex flex-col items-center">
+                <span className="font-semibold text-lg">{posts.length}</span>
+                <span className="text-xs">Posts</span>
+              </div>
             </div>
             <div className="mt-4 flex gap-2">
               {isOwnProfile ? (
-                <button className="flex-1 bg-muted text-foreground py-2 rounded-lg font-semibold">Add Story</button>
+                <>
+                <button 
+                  onClick={onAddStoryClick}
+                  className="flex-1 bg-muted text-foreground py-2 rounded-lg font-semibold hover:bg-muted/80 transition-colors"
+                >
+                  Add Story
+                </button>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <button className="flex-1 bg-[#0e9591] text-white py-2 rounded-lg font-semibold hover:bg-[#087a74] transition-colors">
+                        Edit Profile
+                      </button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto w-[calc(100vw-2rem)] sm:w-auto mx-auto rounded-lg">
+                      <DialogHeader>
+                        <DialogTitle>Edit Profile</DialogTitle>
+                      </DialogHeader>
+                      <EditProfileForm
+                        userData={finalProfile}
+                        userType={finalProfile?.user_type}
+                        onProfileUpdated={() => {
+                          refreshUserProfile?.();
+                          toast({
+                            title: "Profile Updated",
+                            description: "Your profile has been updated successfully!",
+                            variant: "success"
+                          });
+                        }}
+                      />
+                    </DialogContent>
+                  </Dialog>
+                </>
               ) : (
                 <>
                   <button 
@@ -851,15 +751,26 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
                 </>
               )}
             </div>
+            
+            {/* Profile Completion Indicator - Only show for own profile */}
+            {isOwnProfile && (
+              <div className="mt-4 p-3 bg-muted/50 rounded-lg border border-border">
+                <ProfileCompletionIndicator 
+                  completionPercentage={useProfileCompletion(finalProfile, finalProfile?.user_type)} 
+                  showDetails={true}
+                  className="justify-center"
+                />
+              </div>
+            )}
           </div>
           {/* Sticky Tabs */}
-          <div className="sticky top-0 z-30 bg-card border-b-2 border-border">
+          <div className="sticky top-0 z-30 bg-card border-b-4 border-border">
             <div className="flex space-x-8 px-4">
               {['posts', 'photos', 'videos', 'about'].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`py-3 border-b-2 font-medium text-sm capitalize transition-colors ${
+                  className={`py-3 border-b-4 font-medium text-sm capitalize transition-colors ${
                     activeTab === tab
                       ? 'border-[#0e9591] text-[#0e9591]'
                       : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -927,7 +838,7 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
                       likes: post.likes_count || safeLikes,
                       comments: post.comments_count || safeComments,
                       shares: post.shares_count || safeShares,
-                      timeAgo: safeCreatedAt ? formatTimeAgo(safeCreatedAt) : "",
+                      timeAgo: safeCreatedAt ? formatTimestamp(safeCreatedAt) : "",
                       category: post.users?.sport || safeAuthorSport,
                       isLiked: post.isLiked || false,
                       isSaved: post.isSaved || false,
@@ -955,7 +866,7 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
           {/* About Content */}
           {activeTab === 'about' && (
             <div className="mt-6 bg-card rounded-lg shadow-sm p-6">
-              <h3 className="font-semibold text-foreground mb-4 text-lg">About</h3>
+              <h3 className="trofify-header mb-4">About</h3>
               <div className="space-y-4">
                 <p className="text-muted-foreground">
                   {currentProfile.bio || "No bio available."}
@@ -995,6 +906,15 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Profile Photo Upload Component */}
+        <ProfilePhotoUpload
+          open={showPhotoUpload}
+          onOpenChange={setShowPhotoUpload}
+          userId={finalProfile?.id || ''}
+          refreshUserProfile={refreshUserProfile}
+          onImageUploaded={handlePhotoUploaded}
+        />
       </>
     );
   }
@@ -1020,18 +940,18 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
         {/* Profile Image - left side */}
         <div className="flex-shrink-0 flex flex-col items-center justify-center w-full md:w-auto relative">
           <img
-            key={`desktop-profile-image-${profileImage || normalizedProfile?.avatar}`}
+            key={`desktop-profile-image-${profileImage || normalizedProfile?.avatar}-${profileImageKey}`}
             src={imageLoadError ? "/placeholder.svg" : getAvatarUrlWithCacheBust(profileImage || normalizedProfile?.avatar)}
             alt="Profile"
             className="w-64 h-80 object-cover rounded-2xl border-4 border-background shadow-md bg-muted"
             style={{ minWidth: 220, minHeight: 220 }}
             onError={() => {
-              console.log("Desktop profile image failed to load:", profileImage || normalizedProfile?.avatar);
+      
               setImageLoadError(true);
               setImageLoading(false);
             }}
             onLoad={() => {
-              console.log("Desktop profile image loaded successfully:", profileImage || normalizedProfile?.avatar);
+      
               setImageLoadError(false);
               setImageLoading(false);
             }}
@@ -1039,84 +959,94 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
           {isOwnProfile && (
             <button
               className="absolute bottom-3 right-3 bg-background rounded-full p-2 shadow-md border border-border hover:bg-[#0e9591] group transition"
-              onClick={() => setShowImageDialog(true)}
+              onClick={handlePhotoUploadClick}
               aria-label="Change profile image"
               style={{ zIndex: 10 }}
             >
               <Camera className="h-5 w-5 text-[#0e9591] group-hover:text-white transition-colors" />
             </button>
           )}
-          {/* Profile Image Change Modal for Desktop */}
-          <Dialog open={showImageDialog} onOpenChange={setShowImageDialog}>
-            <DialogContent className="max-w-xs w-full p-4 text-center">
-              <DialogHeader>
-                <DialogTitle>Change Profile Image</DialogTitle>
-              </DialogHeader>
-              <div className="flex flex-col gap-3 mt-2">
-                <button
-                  className="bg-[#0e9591] text-white py-2 rounded-lg font-semibold"
-                  onClick={() => {
-                    setShowImageDialog(false);
-                    setTimeout(() => cameraInputRef.current?.click(), 200);
-                  }}
-                  disabled={uploading}
-                >
-                  Open Camera
-                </button>
-                <button
-                  className="bg-muted text-foreground py-2 rounded-lg font-semibold"
-                  onClick={() => {
-                    setShowImageDialog(false);
-                    setTimeout(() => galleryInputRef.current?.click(), 200);
-                  }}
-                  disabled={uploading}
-                >
-                  Open Gallery
-                </button>
-                {uploading && <Spinner />}
-              </div>
-            </DialogContent>
-          </Dialog>
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            ref={cameraInputRef}
-            style={{ display: 'none' }}
-            onChange={handleFileChange}
-          />
-          <input
-            type="file"
-            accept="image/*"
-            ref={galleryInputRef}
-            style={{ display: 'none' }}
-            onChange={handleFileChange}
+          {/* Profile Photo Upload Component */}
+          <ProfilePhotoUpload
+            open={showPhotoUpload}
+            onOpenChange={setShowPhotoUpload}
+            userId={finalProfile?.id || ''}
+            refreshUserProfile={refreshUserProfile}
+            onImageUploaded={handlePhotoUploaded}
           />
         </div>
         {/* Profile Details - right side */}
         <div className="flex-1 flex flex-col justify-center items-center md:items-start text-center md:text-left">
           <div className="flex items-center gap-2 mb-2">
-            <h1 className="text-3xl font-bold text-foreground flex items-center">
+            <h1 className="trofify-title flex items-center text-foreground">
               {getDisplayName(finalProfile)}
               <span className="ml-2 text-[#0e9591] text-xl">🏆</span>
             </h1>
           </div>
           <div className="mb-2">
-            <span className="bg-[#0e9591] text-white px-4 py-1 rounded-full text-base font-semibold tracking-wide">
-              {finalProfile?.sport?.toUpperCase() || 'SPORT'}
-            </span>
+            <div className="flex items-center space-x-2">
+              {finalProfile?.sport && (
+                <span className="bg-gray-600 text-white px-4 py-1 rounded-full text-base font-semibold tracking-wide flex items-center justify-center">
+                  {finalProfile.sport.toUpperCase()}
+                </span>
+              )}
+              <span className="bg-[#0e9591] text-white px-4 py-1 rounded-full text-base font-semibold tracking-wide flex items-center justify-center">
+                {(finalProfile?.user_type || 'USER').toUpperCase()}
+              </span>
+            </div>
+
           </div>
-          <div className="flex gap-4 text-base text-foreground mb-2">
-            <span><span className="font-semibold">{(supporterCount || 0).toLocaleString()}</span> Supporters</span>
-            <span>•</span>
-                          <span><span className="font-semibold">{(supportingCount || 0).toLocaleString()}</span> Supporting</span>
+          <div className="flex gap-8 text-base text-foreground mb-2">
+            <div className="flex flex-col items-center md:items-start">
+              <span className="font-semibold text-xl">{(supporterCount || 0).toLocaleString()}</span>
+              <span className="text-sm text-muted-foreground">Supporters</span>
+            </div>
+            <div className="flex flex-col items-center md:items-start">
+              <span className="font-semibold text-xl">{(supportingCount || 0).toLocaleString()}</span>
+              <span className="text-sm text-muted-foreground">Supporting</span>
+            </div>
+            <div className="flex flex-col items-center md:items-start">
+              <span className="font-semibold text-xl">{posts.length}</span>
+              <span className="text-sm text-muted-foreground">Posts</span>
+            </div>
           </div>
           <div className="mb-4 text-muted-foreground text-base max-w-xl">
             Bienvenidos a la página de Trofify Oficial de {finalProfile?.name}. Welcome to the official {finalProfile?.name} page
           </div>
           <div className="flex gap-4 w-full max-w-md justify-center md:justify-start">
             {isOwnProfile ? (
-              <button className="flex-1 bg-muted text-foreground border-2 border-border py-2 rounded-lg font-semibold text-base shadow">Add Story</button>
+              <>
+              <button 
+                onClick={onAddStoryClick}
+                className="flex-1 bg-muted text-foreground border-2 border-border py-2 rounded-lg font-semibold text-base shadow hover:bg-muted/80 transition-colors"
+              >
+                Add Story
+              </button>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <button className="flex-1 bg-[#0e9591] text-white border-2 border-[#0e9591] py-2 rounded-lg font-semibold text-base shadow hover:bg-[#087a74] transition-colors">
+                      Edit Profile
+                    </button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto w-[calc(100vw-2rem)] sm:w-auto mx-auto rounded-xl">
+                    <DialogHeader>
+                      <DialogTitle>Edit Profile</DialogTitle>
+                    </DialogHeader>
+                    <EditProfileForm
+                      userData={finalProfile}
+                      userType={finalProfile?.user_type}
+                      onProfileUpdated={() => {
+                        refreshUserProfile?.();
+                        toast({
+                          title: "Profile Updated",
+                          description: "Your profile has been updated successfully!",
+                          variant: "success"
+                        });
+                      }}
+                    />
+                  </DialogContent>
+                </Dialog>
+              </>
             ) : (
               <>
                 <button 
@@ -1140,17 +1070,28 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
             )}
             <button className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center text-xl font-bold text-muted-foreground border-2 border-border">...</button>
           </div>
+          
+          {/* Profile Completion Indicator - Only show for own profile */}
+          {isOwnProfile && (
+            <div className="mt-4 p-4 bg-muted/50 rounded-lg border border-border">
+              <ProfileCompletionIndicator 
+                completionPercentage={useProfileCompletion(finalProfile, finalProfile?.user_type)} 
+                showDetails={true}
+                className="justify-center md:justify-start"
+              />
+            </div>
+          )}
         </div>
       </div>
 
       {/* Tabs Navigation */}
-      <div className="w-full mt-8 border-b-2 border-border">
+      <div className="w-full mt-8 border-b-4 border-border">
         <div className="flex space-x-8 overflow-x-auto justify-center">
           {['Posts', 'Photos', 'Videos', 'About'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab.toLowerCase())}
-              className={`py-3 px-1 border-b-2 font-medium text-lg capitalize whitespace-nowrap transition-colors duration-150 ${
+              className={`py-3 px-1 border-b-4 font-medium text-lg capitalize whitespace-nowrap transition-colors duration-150 ${
                 activeTab === tab.toLowerCase()
                   ? 'border-[#0e9591] text-[#0e9591]'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -1196,10 +1137,6 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
               ) : (
                 <div className="space-y-0">
                   {(posts || []).filter(Boolean).map((post) => {
-                    console.log('ProfileView: Original post data:', post);
-                    console.log('ProfileView: post.images:', post.images);
-                    console.log('ProfileView: post.media_url:', post.media_url);
-                    
                     // Parse images array if present and stringified (same logic as Feed component)
                     let images = [];
                     if (Array.isArray(post.images)) {
@@ -1228,14 +1165,11 @@ export const ProfileView = ({ profile, onBack, loggedInUserId, refreshUserProfil
                       likes: post.likes || 0,
                       comments: post.comments || 0,
                       shares: post.shares || 0,
-                      timeAgo: post.created_at ? formatTimeAgo(post.created_at) : "",
+                      timeAgo: post.created_at ? formatTimestamp(post.created_at) : "",
                       category: currentProfile.sport || currentProfile.user_type,
                     };
-
-                    console.log('ProfileView: Transformed post data:', transformedPost);
-                    console.log('ProfileView: Transformed post.images:', transformedPost.images);
                     return (
-                                          <div key={post.id} className="border-b-2 border-border">
+                                          <div key={post.id} className="border-b-4 border-border">
                       <PostCard
                         post={transformedPost}
                         onProfileClick={onProfileClick}

@@ -3,11 +3,13 @@ import { ArrowLeft, Heart, MessageCircle, Share, Bookmark, MoreHorizontal, Loade
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { toProperCase } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { CommentModal } from "./CommentModal";
 import axios from "axios";
 import { toast } from "@/components/ui/use-toast";
-import { getBackendUrl } from "@/lib/utils";
+import { getBackendUrl, formatTimestamp } from "@/lib/utils";
+import { SupportService } from "@/lib/supportService";
 
 interface PostDetailViewProps {
   post: any;
@@ -29,22 +31,9 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
   const [saveUsers, setSaveUsers] = useState<any[]>([]);
   const [commentUsers, setCommentUsers] = useState<any[]>([]);
   const [actionsLoading, setActionsLoading] = useState(true);
+  const [isSupporting, setIsSupporting] = useState(false);
+  const [supportLoading, setSupportLoading] = useState(false);
 
-  // Format date for display
-  const formatDate = (dateString: string) => {
-    if (!dateString) return "Recently";
-    
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return "Recently";
-    
-    return date.toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
 
   const fetchActionCounts = async () => {
     setActionsLoading(true);
@@ -143,7 +132,6 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
         const response = await fetch(`${getBackendUrl()}/api/users/${post.user_id}`);
         if (response.ok) {
           const completeProfile = await response.json();
-          console.log("PostDetailView: Complete profile fetched:", completeProfile);
           onProfileClick(completeProfile);
         } else {
           console.error('Failed to fetch complete profile, using fallback');
@@ -190,6 +178,60 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
     }
   };
 
+  // Handle support/un-support
+  const handleSupportClick = async () => {
+    if (!userId || !post.author_id || userId === post.author_id || supportLoading) {
+      return;
+    }
+
+    setSupportLoading(true);
+    try {
+      const result = await SupportService.toggleSupport(userId, post.author_id);
+      setIsSupporting(result.action === 'supported');
+
+      if (result.action === 'supported') {
+        toast({
+          title: "Support Added",
+          description: `You are now supporting ${post.author_name || post.display_name}`,
+          variant: "success"
+        });
+      } else {
+        toast({
+          title: "Support Removed",
+          description: `You are no longer supporting ${post.author_name || post.display_name}`,
+          variant: "default"
+        });
+      }
+    } catch (error) {
+      console.error('Error toggling support:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update support status. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setSupportLoading(false);
+    }
+  };
+
+  // Check if current user is supporting this post author
+  useEffect(() => {
+    const checkSupportStatus = async () => {
+      if (!userId || !post.author_id || userId === post.author_id) {
+        return;
+      }
+
+      try {
+        const supporting = await SupportService.isSupporting(userId, post.author_id);
+        setIsSupporting(supporting);
+      } catch (error) {
+        console.error('Error checking support status:', error);
+      }
+    };
+
+    checkSupportStatus();
+  }, [userId, post.author_id]);
+
   // Helper to get the correct avatar URL
   const getAvatarUrl = (avatar?: string) => {
     if (!avatar) return "/placeholder.svg";
@@ -205,10 +247,10 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
   };
 
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="bg-card border-b-2 border-border flex-shrink-0">
-        <div className="flex items-center justify-between px-4 py-3">
+      <div className="bg-card border-b border-border p-4">
+        <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <Button
               variant="ghost"
@@ -240,7 +282,7 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="max-w-2xl mx-auto bg-card">
           {/* Post Header */}
-          <div className="flex items-center justify-between p-4 border-b-2 border-border">
+          <div className="flex items-center justify-between p-4 border-b-4 border-border">
             <div className="flex items-center space-x-3">
               <Avatar
                 className="h-12 w-12 cursor-pointer hover:ring-2 hover:ring-blue-500 transition-all"
@@ -259,21 +301,49 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
                   >
                     {post.author_name || post.display_name || post.email || "Unknown User"}
                   </span>
-                  {(post.category || post.user_type) && (
-                    <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white">
-                      {post.category || post.user_type}
-                    </Badge>
+                  {userId !== post.author_id && <span className="text-white text-xs">⦿</span>}
+                  {userId !== post.author_id && (
+                    <>
+                      <div className="w-0.5"></div> {/* 2px gap */}
+                      <span
+                        className={`font-semibold font-bold cursor-pointer hover:underline transition-all duration-200 hover:opacity-80 text-sm ${
+                          isSupporting 
+                            ? 'text-gray-400 opacity-70' 
+                            : 'text-[#0e9591]'
+                        }`}
+                        onClick={handleSupportClick}
+                        style={{ pointerEvents: supportLoading ? 'none' : 'auto', opacity: supportLoading ? 0.5 : 1 }}
+                        title={isSupporting ? "Click to unsupport" : "Click to support"}
+                      >
+                        {supportLoading ? 'Loading...' : (isSupporting ? 'Supporting' : 'Support')}
+                      </span>
+                    </>
                   )}
                 </div>
-                <div className="text-sm text-muted-foreground">
-                  {formatDate(post.created_at)}
-                </div>
+                            <div className="flex flex-col space-y-1">
+              <div></div> {/* Spacer for top */}
+              <div className="flex items-center space-x-1">
+                {post.sport && (
+                  <Badge variant="secondary" className="text-xs bg-gray-600 text-white w-fit flex items-center justify-center">
+                    {toProperCase(post.sport)}
+                  </Badge>
+                )}
+                {(post.category || post.user_type) && (
+                  <Badge variant="secondary" className="text-xs bg-[#0e9591] text-white w-fit flex items-center justify-center">
+                    {toProperCase(post.category || post.user_type)}
+                  </Badge>
+                )}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                {formatTimestamp(post.created_at)}
+              </div>
+            </div>
               </div>
             </div>
           </div>
 
           {/* Post Description */}
-          <div className="p-4 border-b-2 border-border">
+          <div className="p-4 border-b-4 border-border">
             <p className="text-foreground text-base leading-relaxed">
               {post.description || post.content || "No description"}
             </p>
@@ -281,7 +351,7 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
 
           {/* Post Media */}
           {(post.media_url || post.image || post.images) && (
-            <div className="border-b-2 border-border">
+            <div className="border-b-4 border-border">
               {post.media_type === 'video' ? (
                 <video
                   src={getMediaUrl(post.media_url)}
@@ -301,7 +371,7 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
           )}
 
           {/* Post Actions */}
-          <div className="p-4 border-b-2 border-border">
+          <div className="p-4 border-b-4 border-border">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 {actionsLoading ? (
@@ -315,10 +385,10 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
                       variant="ghost"
                       size="sm"
                       onClick={handleLike}
-                      className={`px-4 py-2 transform -skew-x-12 ${liked ? "bg-[#0e9591]/20 text-[#0e9591]" : "bg-[#0e9591]/10 text-[#0e9591] hover:bg-[#0e9591]/20"}`}
+                      className={`px-4 py-2 transform -skew-x-12 ${liked ? "bg-red-500/20 text-red-500" : "bg-red-500/10 text-red-500 hover:bg-red-500/20"}`}
                     >
                       <div className="transform skew-x-12 flex items-center">
-                        <Heart className={`h-4 w-4 mr-2 ${liked ? "fill-current" : ""}`} />
+                        <Heart className={`h-4 w-4 mr-2 ${liked ? "fill-red-500 stroke-red-500" : "stroke-red-500"}`} />
                         {likes}
                       </div>
                     </Button>
@@ -351,9 +421,11 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
                 variant="ghost"
                 size="sm"
                 onClick={handleSave}
-                className={saved ? "text-[#0e9591]" : "text-muted-foreground"}
+                className={saved ? "text-[#0e9591] bg-[#0e9591]/20" : "text-muted-foreground"}
               >
-                <Bookmark className={`h-5 w-5 ${saved ? "fill-current" : ""}`} />
+                <Bookmark
+                  className={`h-5 w-5 transition-colors duration-150 ${saved ? "fill-[#0e9591] stroke-[#0e9591]" : "stroke-[#0e9591]"}`}
+                />
               </Button>
             </div>
           </div>
@@ -401,16 +473,10 @@ export const PostDetailView = ({ post, onBack, userId, onProfileClick, onSaveCha
       <CommentModal
         open={commentModalOpen}
         onOpenChange={setCommentModalOpen}
-        postId={post.id}
-        userId={userId}
-        onCommentAdded={() => {
-          setComments(c => c + 1);
-          fetchActionCounts();
-        }}
-        onCommentDeleted={() => {
-          setComments(c => c - 1);
-          fetchActionCounts();
-        }}
+        postId={String(post.id)}
+        userId={String(userId)}
+        onCommentAdded={() => setComments(c => c + 1)}
+        onCommentDeleted={() => setComments(c => c - 1)}
         onProfileClick={onProfileClick}
       />
     </div>

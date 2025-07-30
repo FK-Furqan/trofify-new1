@@ -12,11 +12,12 @@ interface MessagesViewProps {
   targetUserId?: string; // For direct messaging from profile
   onClearTargetUser?: () => void; // Callback to clear targetUserId
   onRefreshConversations?: () => void; // Callback to refresh conversations list
+  onViewChange?: (view: 'conversations' | 'conversation' | 'new-message') => void; // New callback for view changes
 }
 
 type ViewState = 'conversations' | 'conversation' | 'new-message';
 
-export const MessagesView = ({ onProfileClick, currentUserId, targetUserId, onClearTargetUser, onRefreshConversations }: MessagesViewProps) => {
+export const MessagesView = ({ onProfileClick, currentUserId, targetUserId, onClearTargetUser, onRefreshConversations, onViewChange }: MessagesViewProps) => {
   const [currentView, setCurrentView] = useState<ViewState>('conversations');
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(false);
@@ -25,11 +26,13 @@ export const MessagesView = ({ onProfileClick, currentUserId, targetUserId, onCl
   const handleConversationSelect = (conversation: Conversation) => {
     setSelectedConversation(conversation);
     setCurrentView('conversation');
+    onViewChange?.('conversation'); // Notify parent of view change
   };
 
   // Handle new message button click
   const handleNewMessage = () => {
     setCurrentView('new-message');
+    onViewChange?.('new-message'); // Notify parent of view change
   };
 
   // Handle back navigation
@@ -39,8 +42,10 @@ export const MessagesView = ({ onProfileClick, currentUserId, targetUserId, onCl
       setSelectedConversation(null);
       onClearTargetUser?.(); // Clear targetUserId when going back from a conversation
       onRefreshConversations?.(); // Refresh conversations to update unread counts
+      onViewChange?.('conversations'); // Notify parent of view change
     } else if (currentView === 'new-message') {
       setCurrentView('conversations');
+      onViewChange?.('conversations'); // Notify parent of view change
     }
   };
 
@@ -48,6 +53,7 @@ export const MessagesView = ({ onProfileClick, currentUserId, targetUserId, onCl
   const handleConversationStart = (conversation: Conversation) => {
     setSelectedConversation(conversation);
     setCurrentView('conversation');
+    onViewChange?.('conversation'); // Notify parent of view change
   };
 
   // Handle messages being read
@@ -70,6 +76,7 @@ export const MessagesView = ({ onProfileClick, currentUserId, targetUserId, onCl
       setLoading(false);
       // Don't create a fallback conversation - just show error
       setCurrentView('conversations');
+      onViewChange?.('conversations'); // Notify parent of view change
     }, 10000); // 10 second timeout
     
     try {
@@ -113,11 +120,13 @@ export const MessagesView = ({ onProfileClick, currentUserId, targetUserId, onCl
       clearTimeout(timeoutId);
       setSelectedConversation(conversation);
       setCurrentView('conversation');
+      onViewChange?.('conversation'); // Notify parent of view change
     } catch (error) {
       console.error('Failed to create conversation with target user:', error);
       clearTimeout(timeoutId);
       // Don't create a fallback conversation - just show error and go back to conversations list
       setCurrentView('conversations');
+      onViewChange?.('conversations'); // Notify parent of view change
     } finally {
       setLoading(false);
     }
@@ -133,8 +142,14 @@ export const MessagesView = ({ onProfileClick, currentUserId, targetUserId, onCl
       // Reset to conversations list if no targetUserId
       setCurrentView('conversations');
       setSelectedConversation(null);
+      onViewChange?.('conversations'); // Notify parent of view change
     }
   }, [targetUserId, currentUserId]);
+
+  // Notify parent of initial view state
+  useEffect(() => {
+    onViewChange?.(currentView);
+  }, [currentView, onViewChange]);
 
   // Show loading state while creating conversation
   if (loading) {
